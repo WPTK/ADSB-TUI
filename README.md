@@ -13,7 +13,7 @@ ADS-B Tracker TUI is a Python-based terminal interface that connects to a `dump1
   - Distance from Tracker (miles)
   - Aircraft Owner (via FAA `master.csv`)
   - Heading (degrees) and Direction (e.g., N, NE, SW)
-  - Proximity Alerts
+  - Proximity Alerts (very basic, it just adds "YES" to the alert tab if it's going to fly over your house. 
 - **Customizable**: Adjust the radius, proximity alert distance, refresh rate, and more.
 - **Retro TUI Style**: Classic terminal-based user interface.
 
@@ -112,6 +112,13 @@ If your script is running on a machine separate from the `dump1090` server, ensu
    ```
    DUMP1090_URL = "http://<dump1090-server-ip>/run/readsb/aircraft.json"
    ```
+5. You may need to restart the `dump1090` and `xyx` processes after making these changes. Note your `dump1090` may have a different name, like `dump1090-fa`
+   ```bash
+   sudo systemctl restart dump1090
+   sudo systemctl restart readsb
+   sudo systemctl restart lighttpd
+   ```
+   
 
 ---
 
@@ -130,29 +137,35 @@ If your script is running on a machine separate from the `dump1090` server, ensu
   REFRESH_INTERVAL = 10  # Refresh every 10 seconds
   ```
 
-#### **Server URL**
-- If using a different ADS-B tracking service, replace `DUMP1090_URL` with the appropriate endpoint.
+#### **Server URL / aircraft.json File Path**
+- If using a different ADS-B tracking service, replace `DUMP1090_URL` with the appropriate endpoint. URLs and filepaths vary. 
 
 ---
 
 ### **Keyboard Shortcuts**
 - **`q`**: Quit the application.
+- This probably didn't need it's own section. 
 
 ---
 
 ## **Logging**
 - Errors and unique aircraft logs are saved in `adsb_tracker.log`.
+- I should probably limit the file size of this. 
 
 ---
 
 ## **Known Limitations**
 - Assumes a `dump1090`-compatible server for aircraft data.
 - FAA master file must be manually downloaded and converted to CSV.
+- Does not work on non-US aircraft (only have access to those registered with the FAA). Working on this -- suggestions appreciated
+- Does not work on military, LADD, or PIA aircraft. 
+- Aircraft type requires access to an API, that costs money. I don't know of any free options out there, or any database that I can crossreference the `hex code` with.
+- 
 
 ---
 
 ## **Contributing**
-Contributions are welcome! Submit a pull request or file an issue to suggest improvements.
+Contributions are welcome!
 
 ---
 
