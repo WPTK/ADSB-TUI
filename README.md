@@ -137,6 +137,8 @@ If your script is running on a machine separate from the `dump1090` server, ensu
   ```python
   REFRESH_INTERVAL = 10  # Refresh every 10 seconds
   ```
+#### End Result / Screenshot
+![image](https://github.com/user-attachments/assets/cda36726-6520-4d34-bdce-2d1c4a7b4b68)
 
 #### **Server URL / aircraft.json File Path**
 - If using a different ADS-B tracking service, replace `DUMP1090_URL` with the appropriate endpoint. URLs and filepaths vary. 
