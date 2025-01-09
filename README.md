@@ -112,7 +112,7 @@ If your script is running on a machine separate from the `dump1090` server, ensu
    ```
    DUMP1090_URL = "http://<dump1090-server-ip>/run/readsb/aircraft.json"
    ```
-5. You may need to restart the `dump1090` and `xyx` processes after making these changes. Note your `dump1090` may have a different name, like `dump1090-fa`
+5. You may need to restart a few processes after making these changes. Note: your `dump1090` may have a different name, like `dump1090-fa`
    ```bash
    sudo systemctl restart dump1090
    sudo systemctl restart readsb
