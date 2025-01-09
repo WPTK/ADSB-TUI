@@ -1,7 +1,6 @@
-![image](https://github.com/user-attachments/assets/0f729b3e-1ae3-4eab-885b-6c9fd7ce156f)
+![image](https://github.com/user-attachments/assets/5cebeb98-304f-411b-b949-9e3c5add8b48)
 
-# **ADS-B Tracker TUI**
-ADS-B Tracker TUI is a Python-based terminal interface that connects to a `dump1090` or compatible ADS-B receiver. It tracks aircraft in real-time and displays detailed information, such as flight number, altitude, distance, speed, heading, and direction, along with owner data fetched from a `master.csv` file.
+ADSB TUI is a Python-based terminal interface that connects to a `dump1090` or compatible ADS-B receiver. It tracks aircraft in real-time and displays detailed information, such as flight number, altitude, distance, speed, heading, and direction, along with owner data fetched from a `master.csv` file.
 
 ---
 
