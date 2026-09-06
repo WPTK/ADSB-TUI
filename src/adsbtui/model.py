@@ -8,10 +8,10 @@ to a display unit system happens only in `units.py` / the UI layer, never here o
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 
-class AlertLevel(str, Enum):
+class AlertLevel(StrEnum):
     NONE = "none"
     PASSING = "passing"
     OUTBOUND = "outbound"
@@ -91,7 +91,7 @@ class Aircraft:
 
     alert_level: AlertLevel = AlertLevel.NONE
 
-    extra: dict = field(default_factory=dict)  # raw fields not otherwise modeled, for the detail pane
+    extra: dict = field(default_factory=dict)  # unmodeled raw fields, for the detail pane
 
     @property
     def is_military(self) -> bool:
