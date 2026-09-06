@@ -1,0 +1,73 @@
+# ICAO 24-bit address block -> state of registry (ICAO Annex 10, Volume III).
+#
+# PARTIAL BY DESIGN: only blocks we are confident about are listed, because a wrong
+# country is worse than no country. Unlisted addresses simply resolve to None.
+#
+# Columns: start_hex,end_hex,iso2,country,military
+# Ranges may nest -- a military sub-block inside a national block wins because the
+# lookup prefers the latest-starting range that contains the address.
+start_hex,end_hex,iso2,country,military
+008000,00FFFF,ZA,South Africa,0
+010000,017FFF,EG,Egypt,0
+020000,027FFF,MA,Morocco,0
+040000,040FFF,ET,Ethiopia,0
+06A000,06AFFF,QA,Qatar,0
+0A0000,0A7FFF,DZ,Algeria,0
+0D0000,0D7FFF,MX,Mexico,0
+140000,17FFFF,RU,Russian Federation,0
+300000,33FFFF,IT,Italy,0
+340000,37FFFF,ES,Spain,0
+380000,3BFFFF,FR,France,0
+3C0000,3FFFFF,DE,Germany,0
+400000,43FFFF,GB,United Kingdom,0
+# Royal Air Force / UK military sub-block inside the UK allocation.
+43C000,43CFFF,GB,United Kingdom,1
+440000,447FFF,AT,Austria,0
+448000,44FFFF,BE,Belgium,0
+450000,457FFF,BG,Bulgaria,0
+458000,45FFFF,DK,Denmark,0
+460000,467FFF,FI,Finland,0
+468000,46FFFF,GR,Greece,0
+470000,477FFF,HU,Hungary,0
+478000,47FFFF,NO,Norway,0
+480000,487FFF,NL,Netherlands,0
+488000,48FFFF,PL,Poland,0
+490000,497FFF,PT,Portugal,0
+498000,49FFFF,CZ,Czechia,0
+4A0000,4A7FFF,RO,Romania,0
+4A8000,4AFFFF,SE,Sweden,0
+4B0000,4B7FFF,CH,Switzerland,0
+4B8000,4BFFFF,TR,Turkey,0
+4C0000,4C7FFF,RS,Serbia,0
+4C8000,4C83FF,CY,Cyprus,0
+4CA000,4CAFFF,IE,Ireland,0
+4CC000,4CCFFF,IS,Iceland,0
+4D0000,4D03FF,LU,Luxembourg,0
+4D2000,4D23FF,MT,Malta,0
+508000,50FFFF,UA,Ukraine,0
+710000,717FFF,SA,Saudi Arabia,0
+718000,71FFFF,KR,Republic of Korea,0
+730000,737FFF,IR,Iran,0
+738000,73FFFF,IL,Israel,0
+750000,757FFF,MY,Malaysia,0
+758000,75FFFF,PH,Philippines,0
+760000,767FFF,PK,Pakistan,0
+76C000,76CFFF,SG,Singapore,0
+780000,7BFFFF,CN,China,0
+7C0000,7FFFFF,AU,Australia,0
+800000,83FFFF,IN,India,0
+840000,87FFFF,JP,Japan,0
+880000,887FFF,TH,Thailand,0
+888000,88FFFF,VN,Viet Nam,0
+896000,896FFF,AE,United Arab Emirates,0
+8A0000,8A7FFF,ID,Indonesia,0
+# A00000-ADF7C7 is exactly the range the N-number algorithm covers; everything above it
+# in the US block is non-civil (military, government and other special allocations).
+A00000,ADF7C7,US,United States,0
+ADF7C8,AFFFFF,US,United States,1
+C00000,C3FFFF,CA,Canada,0
+C80000,C87FFF,NZ,New Zealand,0
+E00000,E3FFFF,AR,Argentina,0
+E40000,E7FFFF,BR,Brazil,0
+E80000,E80FFF,CL,Chile,0
+E84000,E84FFF,CO,Colombia,0

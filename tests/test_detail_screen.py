@@ -284,9 +284,7 @@ class TestRenderLinesPopulatedAircraft:
 
 class TestRenderLinesUnitSystems:
     def test_metric_units_used_in_output(self):
-        ac = make_aircraft(
-            altitude_ft=10000, ground_speed_kt=300, distance_mi=10, on_ground=False
-        )
+        ac = make_aircraft(altitude_ft=10000, ground_speed_kt=300, distance_mi=10, on_ground=False)
         screen = DetailScreen(ac, "metric")
         text = "\n".join(screen.render_lines(100, 40))
         alt_line = next(line for line in text.splitlines() if line.startswith("Altitude"))
@@ -308,9 +306,7 @@ class TestRenderLinesUnitSystems:
 
 class TestRenderLinesGeometry:
     def test_respects_width_clipping(self):
-        ac = DetailScreen(
-            make_aircraft(owner_name="A" * 200, source_type="adsb_icao"), "imperial"
-        )
+        ac = DetailScreen(make_aircraft(owner_name="A" * 200, source_type="adsb_icao"), "imperial")
         lines = ac.render_lines(20, 40)
         assert all(len(line) <= 20 for line in lines)
 

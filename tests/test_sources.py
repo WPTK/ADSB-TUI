@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from adsbtui.sources import (
+    SourceError,
     SourceInvalidData,
     SourceUnreachable,
     make_source,
@@ -99,10 +100,20 @@ class TestHttpSource:
             server.shutdown()
             server.server_close()
 
-    def test_connection_refused_is_unreachable(self):
-        # Nothing is listening on this port, so the connection should fail immediately.
+    def test_unreachable_endpoint_raises_a_typed_source_error(self):
+        """Nothing is listening on this port, so the fetch must fail as one of our own
+        exception types rather than leaking a raw urllib error to the caller.
+
+        Deliberately asserts the SourceError base class rather than a specific subclass:
+        how a host reports "nothing here" is platform-dependent. Linux answers a connection
+        to a dead port with an immediate RST, which surfaces as SourceUnreachable; Windows
+        silently drops the packet instead, so the same call surfaces as SourceTimeout after
+        the timeout expires. Both are correct classifications of what actually happened,
+        and pinning either one makes the test a statement about the host's TCP stack
+        instead of about this module.
+        """
         source = HttpSource("http://127.0.0.1:1/aircraft.json", max_bytes=8_000_000)
-        with pytest.raises(SourceUnreachable):
+        with pytest.raises(SourceError):
             source.fetch(timeout=2.0)
 
 

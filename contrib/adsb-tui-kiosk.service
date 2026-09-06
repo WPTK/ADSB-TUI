@@ -1,0 +1,65 @@
+# adsb-tui-kiosk.service
+#
+# Runs adsbtui full-screen on a physical console (tty1), so a dedicated Raspberry Pi /
+# small-form-factor box boots straight into the aircraft table with no login prompt, no
+# desktop environment, and no SSH session required.
+#
+# NOTE: as documented in the project README's "Known limitations" section, this snapshot
+# of adsbtui does not yet ship a working `adsbtui` console script (src/adsbtui/__main__.py
+# has not landed). Installing and enabling this unit today will restart-loop until that
+# entry point exists; adjust ExecStart below if you are running the TUI a different way in
+# the meantime (e.g. `/usr/bin/python3 -m adsbtui.ui.app` once such a module exists, or a
+# wrapper script of your own).
+#
+# Install:
+#   sudo useradd --system --create-home --shell /usr/sbin/nologin adsbtui   # if it doesn't exist
+#   sudo mkdir -p /home/adsbtui/.config/adsbtui
+#   sudo cp /path/to/your/config.toml /home/adsbtui/.config/adsbtui/config.toml
+#   sudo chown -R adsbtui:adsbtui /home/adsbtui/.config
+#   sudo cp contrib/adsb-tui-kiosk.service /etc/systemd/system/
+#   sudo systemctl disable --now getty@tty1.service   # free up tty1 first
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now adsb-tui-kiosk.service
+#
+# Watch it: sudo journalctl -u adsb-tui-kiosk.service -f
+# Get tty1 back later: sudo systemctl disable --now adsb-tui-kiosk.service && \
+#                       sudo systemctl enable --now getty@tty1.service
+
+[Unit]
+Description=ADSB-TUI kiosk (full-screen aircraft tracker on tty1)
+Documentation=file:///usr/share/doc/adsb-tui/README.md
+After=network-online.target getty@tty1.service
+Wants=network-online.target
+Conflicts=getty@tty1.service
+
+[Service]
+Type=simple
+User=adsbtui
+Group=adsbtui
+WorkingDirectory=/home/adsbtui
+
+# adsbtui looks for ~/.config/adsbtui/config.toml by default (see find_config_path() in
+# src/adsbtui/config.py); ADSBTUI_CONFIG overrides that, and any ADSBTUI_<SECTION>_<KEY>
+# variable overrides an individual TOML key without editing the file. Uncomment/adjust as
+# needed rather than baking secrets or hosts into this unit file directly.
+# Environment=ADSBTUI_CONFIG=/home/adsbtui/.config/adsbtui/config.toml
+# Environment=ADSBTUI_SOURCE_URL=http://192.168.1.50/skyaware/data/aircraft.json
+Environment=TERM=linux
+
+ExecStart=/usr/bin/adsbtui
+
+# Bind stdio directly to the physical console instead of the service manager's own
+# pty/journal plumbing, and take ownership of the console so no getty can race it.
+StandardInput=tty
+StandardOutput=tty
+StandardError=journal
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

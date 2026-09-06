@@ -128,7 +128,14 @@ class WatchlistConfig:
 
 @dataclass
 class RegistryConfig:
+    #: Optional FAA-format CSV (N-NUMBER,NAME,MODE S CODE HEX). Legacy bring-your-own
+    #: path, kept working for anyone who already had one.
     path: str = ""
+    #: SQLite cache built by 'adsbtui registry update' from tar1090-db and/or the FAA
+    #: bulk registry. This is the path the Data screen manages and the enricher reads.
+    db: str = "~/.local/share/adsbtui/registry.sqlite"
+    #: Warn in the Data screen once a downloaded database is older than this.
+    max_age_days: int = 30
 
 
 @dataclass
@@ -466,14 +473,15 @@ def build_argparser() -> argparse.ArgumentParser:
 
     # Parsed here for a stable, single CLI surface; interpreted by other modules.
     parser.add_argument("--once", action="store_true", default=False, help="fetch once and exit")
-    parser.add_argument(
-        "--watch", type=int, default=None, help="run N poll cycles then exit"
-    )
+    parser.add_argument("--watch", type=int, default=None, help="run N poll cycles then exit")
     parser.add_argument(
         "--headless", action="store_true", default=False, help="run without the curses UI"
     )
     parser.add_argument(
-        "--batch", action="store_true", default=False, help="alias for --headless --once"
+        "--batch",
+        action="store_true",
+        default=False,
+        help="stream SEEN/NEW/LOST/ALERT lines as aircraft appear, disappear, or change alert",
     )
     parser.add_argument(
         "--format",

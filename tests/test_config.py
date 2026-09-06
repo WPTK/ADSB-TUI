@@ -28,8 +28,9 @@ def _base_toml(lat: float = 1.0, lon: float = 1.0) -> dict:
 
 class TestDefaults:
     def test_defaults_only_config_passes_with_allow_null_home(self):
-        cfg = build_config({"source": {"url": "http://localhost:8080/data/aircraft.json"}},
-                            allow_null_home=True)
+        cfg = build_config(
+            {"source": {"url": "http://localhost:8080/data/aircraft.json"}}, allow_null_home=True
+        )
         assert isinstance(cfg, Config)
         assert cfg.home.lat == 0.0
         assert cfg.home.lon == 0.0

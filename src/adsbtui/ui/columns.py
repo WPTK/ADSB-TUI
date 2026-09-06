@@ -65,8 +65,8 @@ class ColumnSpec:
 #: key -> ColumnSpec, for every column this module knows how to render.
 COLUMN_SPECS: dict[str, ColumnSpec] = {
     "flight": ColumnSpec("flight", "FLIGHT", min_width=7, max_width=10, priority=0, align="left"),
-    "alt": ColumnSpec("alt", "ALT", min_width=7, max_width=9, priority=1, align="right"),
-    "gs": ColumnSpec("gs", "GS", min_width=6, max_width=8, priority=2, align="right"),
+    "alt": ColumnSpec("alt", "ALT", min_width=9, max_width=10, priority=1, align="right"),
+    "gs": ColumnSpec("gs", "GS", min_width=7, max_width=9, priority=2, align="right"),
     "dist": ColumnSpec("dist", "DIST", min_width=7, max_width=9, priority=3, align="right"),
     "alert": ColumnSpec("alert", "ALERT", min_width=5, max_width=8, priority=4, align="left"),
     "vs": ColumnSpec("vs", "VS", min_width=10, max_width=12, priority=5, align="left"),
@@ -76,7 +76,7 @@ COLUMN_SPECS: dict[str, ColumnSpec] = {
     "flags": ColumnSpec("flags", "FLAGS", min_width=5, max_width=20, priority=9, align="left"),
     "owner": ColumnSpec("owner", "OWNER", min_width=5, max_width=40, priority=10, align="left"),
     "age": ColumnSpec("age", "AGE", min_width=3, max_width=3, priority=11, align="right"),
-    "cpa": ColumnSpec("cpa", "CPA", min_width=8, max_width=12, priority=12, align="left"),
+    "cpa": ColumnSpec("cpa", "CPA", min_width=10, max_width=12, priority=12, align="left"),
     "hex": ColumnSpec("hex", "HEX", min_width=6, max_width=7, priority=13, align="left"),
 }
 
@@ -103,9 +103,11 @@ DEFAULT_COLUMNS: list[str] = [
 _ALERT_TAGS: dict[AlertLevel, str] = {
     AlertLevel.NONE: "",
     AlertLevel.PASSING: "",
-    AlertLevel.OUTBOUND: "OUTBOUND",
-    AlertLevel.INBOUND: "INBOUND",
-    AlertLevel.OVERHEAD: "OVERHEAD",
+    # Kept to 5 characters so they survive the alert column's min_width intact: a
+    # truncated "OVERH"/"INBOU" reads as a rendering bug rather than a status.
+    AlertLevel.OUTBOUND: "OUTBD",
+    AlertLevel.INBOUND: "INBND",
+    AlertLevel.OVERHEAD: "OVHD",
     AlertLevel.EMERGENCY: "EMERG",
 }
 
@@ -201,6 +203,10 @@ def _cell_brg(ac: Aircraft, unit_system: str, ascii_only: bool) -> str:
 
 
 def _cell_cpa(ac: Aircraft, unit_system: str, ascii_only: bool) -> str:
+    # An aircraft on the ground is not going to fly over anyone; projecting its taxi
+    # speed into a closest approach produces a technically-correct but useless "56m".
+    if ac.on_ground:
+        return ""
     if ac.cpa_distance_mi is None or ac.cpa_seconds is None:
         return ""
     unit = UNIT_SYSTEMS[unit_system]["distance"]
@@ -209,7 +215,14 @@ def _cell_cpa(ac: Aircraft, unit_system: str, ascii_only: bool) -> str:
 
 
 def _cell_owner(ac: Aircraft, unit_system: str, ascii_only: bool) -> str:
-    return ac.owner_name or "N/A"
+    """Owner, preferring a local registry lookup but falling back to whatever the receiver
+    itself supplied.
+
+    Many receivers run readsb with a --db-file and already send ownOp for every aircraft,
+    including non-US ones a local FAA CSV could never cover. Showing "N/A" while that value
+    sits unused in the record is the exact gap this column exists to close.
+    """
+    return ac.owner_name or ac.owner_operator or "N/A"
 
 
 def _cell_flags(ac: Aircraft, unit_system: str, ascii_only: bool) -> str:

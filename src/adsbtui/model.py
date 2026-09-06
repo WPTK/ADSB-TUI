@@ -89,6 +89,9 @@ class Aircraft:
     # local registry lookup (FAA CSV owner name; see normalize.py's registry loader)
     owner_name: str | None = None
 
+    # set by the watchlist matcher when this aircraft matches a user pattern
+    is_watched: bool = False
+
     alert_level: AlertLevel = AlertLevel.NONE
 
     extra: dict = field(default_factory=dict)  # unmodeled raw fields, for the detail pane

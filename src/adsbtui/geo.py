@@ -26,10 +26,22 @@ MI_PER_DEG_LON_AT_EQUATOR = 69.17
 
 #: 16-point compass rose, index 0 = N, going clockwise in 22.5-degree steps.
 _COMPASS_POINTS = [
-    "N", "NNE", "NE", "ENE",
-    "E", "ESE", "SE", "SSE",
-    "S", "SSW", "SW", "WSW",
-    "W", "WNW", "NW", "NNW",
+    "N",
+    "NNE",
+    "NE",
+    "ENE",
+    "E",
+    "ESE",
+    "SE",
+    "SSE",
+    "S",
+    "SSW",
+    "SW",
+    "WSW",
+    "W",
+    "WNW",
+    "NW",
+    "NNW",
 ]
 
 

@@ -59,9 +59,7 @@ def configure_logging(
         handler = logging.handlers.RotatingFileHandler(
             path, maxBytes=max_bytes, backupCount=backup_count
         )
-        handler.setFormatter(
-            logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-        )
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
         logger.addHandler(handler)
 
     # Defensive: keep urllib3 (and any future dependency that logs through it) quiet even if
