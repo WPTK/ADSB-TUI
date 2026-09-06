@@ -128,7 +128,14 @@ class WatchlistConfig:
 
 @dataclass
 class RegistryConfig:
+    #: Optional FAA-format CSV (N-NUMBER,NAME,MODE S CODE HEX). Legacy bring-your-own
+    #: path, kept working for anyone who already had one.
     path: str = ""
+    #: SQLite cache built by 'adsbtui registry update' from tar1090-db and/or the FAA
+    #: bulk registry. This is the path the Data screen manages and the enricher reads.
+    db: str = "~/.local/share/adsbtui/registry.sqlite"
+    #: Warn in the Data screen once a downloaded database is older than this.
+    max_age_days: int = 30
 
 
 @dataclass

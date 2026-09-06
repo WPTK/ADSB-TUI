@@ -31,12 +31,23 @@ from __future__ import annotations
 import contextlib
 import curses
 import logging
+import os
 import queue
 import sqlite3
 import threading
 import time
 
-from adsbtui import __version__, alerts, dispatch, geo, history, normalize, tracker
+from adsbtui import (
+    __version__,
+    alerts,
+    config_write,
+    dispatch,
+    enrich,
+    geo,
+    history,
+    normalize,
+    tracker,
+)
 from adsbtui import watchlist as watchlist_mod
 from adsbtui.config import Config
 from adsbtui.model import Aircraft, AlertLevel, Snapshot
@@ -44,9 +55,11 @@ from adsbtui.sources import Source, SourceError
 from adsbtui.ui import bars, theme
 from adsbtui.ui import columns as columns_mod
 from adsbtui.ui.screens.columns import ColumnsScreen
+from adsbtui.ui.screens.data import DataScreen
 from adsbtui.ui.screens.detail import DetailScreen
 from adsbtui.ui.screens.filters import FiltersScreen
 from adsbtui.ui.screens.help import HelpScreen
+from adsbtui.ui.screens.settings import SettingsScreen
 from adsbtui.ui.screens.sort import SortScreen
 from adsbtui.ui.screens.watchlist import WatchlistScreen
 
@@ -77,6 +90,8 @@ _LOGGER_NAME = "adsbtui"
 KEYMAP: dict[str, str] = {
     "help": "F1/?",
     "quit": "q",
+    "settings": "F2",
+    "data": "F8",
     "detail": "Enter",
     "sort": "s",
     "filters": "f",
@@ -167,6 +182,8 @@ class App:
             except OSError as exc:
                 self._logger.warning("could not load registry %s: %s", cfg.registry.path, exc)
 
+        self._enricher = self._build_enricher()
+
         self._attrs: dict[str, int] = {}
 
         # Message-rate bookkeeping (main thread only): computed from the cumulative
@@ -221,6 +238,39 @@ class App:
         self._screen = None
         self._screen_name: str | None = None
 
+    def _build_enricher(self) -> enrich.Enricher:
+        """Assemble the registration/type/owner lookup chain.
+
+        Ordered cheapest-and-most-authoritative first: whatever the receiver itself sent,
+        then the downloaded registry database, then a legacy CSV if the user has one, then
+        purely derived facts (an N-number and a country computed from the hex alone). Every
+        provider is optional -- with no databases at all this still yields a registration
+        and country for US aircraft, which is why it is built unconditionally.
+        """
+        providers: list[enrich.Provider] = [enrich.FeedProvider()]
+        db_path = os.path.expanduser(self.cfg.registry.db or "")
+        if db_path and os.path.exists(db_path):
+            try:
+                providers.append(enrich.SqliteProvider(db_path))
+            except sqlite3.Error as exc:
+                self._logger.warning("registry database unusable (%s): %s", db_path, exc)
+        if self._registry:
+            providers.append(enrich.CsvProvider(self._registry))
+        providers.append(enrich.DerivedProvider())
+        return enrich.Enricher(providers)
+
+    def _enrich(self, aircraft: list[Aircraft]) -> None:
+        """Fill in registration/type/owner/flags for each aircraft, in place.
+
+        Enricher.apply() owns the merge rules -- it only writes fields the feed left empty,
+        so the receiver's own database always wins over anything looked up or derived here.
+        """
+        for ac in aircraft:
+            try:
+                self._enricher.apply(ac)
+            except Exception as exc:  # a lookup must never take down the fetch thread
+                self._logger.debug("enrichment failed for %s: %s", ac.hex, exc)
+
     # ------------------------------------------------------------------
     # Background fetch thread -- NEVER call any curses function from here.
     # ------------------------------------------------------------------
@@ -245,6 +295,8 @@ class App:
                         if name:
                             ac.owner_name = name
                     aircraft_list.append(ac)
+
+                self._enrich(aircraft_list)
 
                 home_lat = self.cfg.home.lat
                 home_lon = self.cfg.home.lon
@@ -728,6 +780,14 @@ class App:
             self._screen = WatchlistScreen(
                 self._watch_entries, self._selected_aircraft(aircraft_list)
             )
+        elif name == "settings":
+            self._screen = SettingsScreen(self.cfg)
+        elif name == "data":
+            self._screen = DataScreen(
+                self.cfg.registry.db,
+                csv_path=self.cfg.registry.path,
+                stale_after_days=self.cfg.registry.max_age_days,
+            )
         self._screen_name = name if self._screen is not None else None
 
     def _close_screen(self) -> None:
@@ -766,6 +826,52 @@ class App:
                     watchlist_mod.save(self.cfg.watchlist.path, self._watch_entries)
                 except OSError as exc:
                     self._logger.warning("could not save watchlist: %s", exc)
+        elif name == "settings":
+            self._apply_settings(screen)
+        elif name == "data":
+            # A finished download changes what the enricher can resolve, so rebuild it
+            # rather than leaving the session querying the databases it started with.
+            outcomes = screen.take_finished()
+            if any(outcome.ok for outcome in outcomes):
+                self._enricher = self._build_enricher()
+                self._logger.info("registry updated; enrichment reloaded")
+
+    def _apply_settings(self, screen: SettingsScreen) -> None:
+        """Adopt an edited config into the running session, and persist it if asked.
+
+        Applying and saving are separate user intents: you may want to try a setting for
+        this session without writing it to disk. The screen reports both, and the session
+        adopts the change either way.
+        """
+        if not getattr(screen, "applied", False):
+            return
+        new_cfg = screen.result()
+        # Carry over the bookkeeping attributes the screen does not own.
+        new_cfg._args = self.cfg._args
+        new_cfg._config_path = self.cfg._config_path
+        self.cfg = new_cfg
+
+        # Settings that feed long-lived objects have to be re-read, not just stored.
+        self._registry = {}
+        if self.cfg.registry.path:
+            try:
+                self._registry = normalize.load_owner_registry(self.cfg.registry.path)
+            except OSError as exc:
+                self._logger.warning("could not load registry: %s", exc)
+        self._enricher = self._build_enricher()
+        self._dispatcher = dispatch.Dispatcher(
+            self.cfg.alerts, bell_fn=lambda _event: self._bell_pending.set()
+        )
+
+        if getattr(screen, "save_requested", False):
+            default_path = os.path.expanduser("~/.config/adsbtui/config.toml")
+            path = self.cfg._config_path or default_path
+            try:
+                config_write.dump_config(self.cfg, path)
+                self.cfg._config_path = path
+                self._logger.info("configuration saved to %s", path)
+            except OSError as exc:
+                self._logger.warning("could not save configuration to %s: %s", path, exc)
 
     def _update_msg_rate(self, snapshot: Snapshot) -> None:
         """Update the rolling messages/sec estimate from two successive snapshots'
@@ -852,6 +958,10 @@ class App:
 
             if key in (ord("?"), curses.KEY_F1):
                 self._open_screen("help", aircraft_list)
+            elif key in (curses.KEY_F2, ord(",")):
+                self._open_screen("settings", aircraft_list)
+            elif key in (curses.KEY_F8, ord("D")):
+                self._open_screen("data", aircraft_list)
             elif key in (curses.KEY_ENTER, ord("\n"), ord("\r"), ord("d")):
                 self._open_screen("detail", aircraft_list)
             elif key in (ord("/"), curses.KEY_F3, ord("f"), curses.KEY_F4):

@@ -291,3 +291,113 @@ def test_unknown_screen_name_is_ignored():
     app = _app()
     app._open_screen("does-not-exist", [])
     assert app._screen is None
+
+
+# ----------------------------------------------------------------------------------
+# Enrichment and the settings/data screens
+# ----------------------------------------------------------------------------------
+
+
+def test_enricher_fills_registration_and_country_with_no_databases_at_all():
+    """The derived provider needs no files, so a bare install still identifies US
+    aircraft rather than showing a hex code and nothing else."""
+    app = _app()
+    ac = _ac("a004b3")  # a real US civil hex
+    app._enrich([ac])
+    assert ac.registration is not None
+
+
+def test_enrichment_never_overwrites_what_the_receiver_sent():
+    """The feed is the most authoritative source: a receiver running its own database
+    knows better than anything we derive."""
+    app = _app()
+    ac = _ac("a004b3", registration="N-FROM-FEED", type_code="C172")
+    app._enrich([ac])
+    assert ac.registration == "N-FROM-FEED"
+    assert ac.type_code == "C172"
+
+
+def test_a_failing_lookup_cannot_break_the_fetch_loop():
+    app = _app()
+
+    class Boom:
+        def lookup(self, aircraft):
+            raise RuntimeError("provider exploded")
+
+    app._enricher = Boom()
+    app._enrich([_ac("a004b3")])  # must not raise
+
+
+def test_settings_screen_opens_and_applying_adopts_the_new_config():
+    app = _app()
+    app._open_screen("settings", [])
+    assert app._screen is not None
+
+    edited = app._screen.result()
+    edited.filter.radius = 42.0
+    app._screen.result = lambda: edited
+    app._screen.applied = True
+    app._screen.save_requested = False
+    app._close_screen()
+
+    assert app.cfg.filter.radius == 42.0
+
+
+def test_cancelled_settings_screen_changes_nothing():
+    app = _app()
+    before = app.cfg.filter.radius
+    app._open_screen("settings", [])
+    app._screen.applied = False
+    app._close_screen()
+    assert app.cfg.filter.radius == before
+
+
+def test_saving_settings_writes_a_config_file_that_loads_back(tmp_path):
+    import tomllib
+
+    app = _app()
+    target = tmp_path / "config.toml"
+    app.cfg._config_path = str(target)
+
+    app._open_screen("settings", [])
+    edited = app._screen.result()
+    edited.filter.radius = 23.0
+    app._screen.result = lambda: edited
+    app._screen.applied = True
+    app._screen.save_requested = True
+    app._close_screen()
+
+    assert target.exists()
+    with open(target, "rb") as handle:
+        written = tomllib.load(handle)
+    assert written["filter"]["radius"] == 23.0
+
+
+def test_data_screen_success_rebuilds_the_enricher():
+    """A finished download changes what can be resolved, so the session must not keep
+    querying the databases it started with."""
+    app = _app()
+    app._open_screen("data", [])
+    before = app._enricher
+
+    from adsbtui.ui.screens.data import UpdateOutcome
+
+    app._screen.take_finished = lambda: [
+        UpdateOutcome(source=None, ok=True, row_count=10, message="done")
+    ]
+    app._close_screen()
+    assert app._enricher is not before
+
+
+def test_data_screen_failure_leaves_the_enricher_alone():
+    app = _app()
+    app._open_screen("data", [])
+    before = app._enricher
+
+    from adsbtui.ui.screens.data import UpdateOutcome
+
+    app._screen.take_finished = lambda: [
+        UpdateOutcome(source=None, ok=False, row_count=None, message="download failed")
+    ]
+    app._close_screen()
+    assert app._enricher is before
