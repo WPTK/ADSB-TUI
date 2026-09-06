@@ -24,8 +24,8 @@ import signal
 import sys
 import threading
 
-from . import __version__
-from .config import ConfigError, load_config
+from . import __version__, firstrun
+from .config import ConfigError, build_argparser, load_config
 from .logsetup import configure_logging
 from .output import run_batch, run_headless, run_once, run_watch
 from .sources import SourceError, make_source
@@ -50,6 +50,19 @@ def _stop_predicate_from_signals() -> threading.Event:
     return stop
 
 
+def _parse_args_quietly(argv: list[str] | None):
+    """Re-parse argv for the first-run check, returning None if it will not parse.
+
+    load_config() raised before it could attach the parsed arguments, but deciding whether
+    to offer the wizard needs to know which mode was asked for. argparse exits the process
+    on a bad argument, which would be the wrong outcome while handling a different error.
+    """
+    try:
+        return build_argparser().parse_args(argv)
+    except SystemExit:
+        return None
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the `adsbtui` console script. Returns a process exit code.
 
@@ -59,12 +72,21 @@ def main(argv: list[str] | None = None) -> int:
     try:
         cfg = load_config(argv)
     except ConfigError as exc:
-        print(f"Configuration error: {exc}", file=sys.stderr)
-        print(
-            "Run 'adsbtui --help', or see the README's Configuration section.",
-            file=sys.stderr,
-        )
-        return 2
+        # A person at a terminal with no config yet is exactly who the setup wizard is
+        # for, so offer it rather than sending them to the README. Scripted runs and
+        # non-interactive terminals fall through to the error and exit code below --
+        # see firstrun.should_offer_setup for the conditions.
+        parsed = _parse_args_quietly(argv)
+        started = firstrun.first_run(parsed)
+        if started is None:
+            print(f"Configuration error: {exc}", file=sys.stderr)
+            print(
+                "Run 'adsbtui --help', or see the README's Configuration section.",
+                file=sys.stderr,
+            )
+            return 2
+        cfg, _written = started
+        cfg._args = parsed
 
     configure_logging(
         log_file=cfg.logging.file,

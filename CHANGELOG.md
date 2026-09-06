@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **A first run with no config starts the setup wizard** instead of failing with
+  "source.url is required" and a pointer to the README -- which was the exact moment the
+  wizard existed to handle. It only ever runs for a person at a terminal: scripted modes
+  (`--once`, `--watch`, `--headless`, `--batch`, `--check`), a piped or redirected run,
+  and an explicit `--config` that fails to load all keep the plain error and exit code 2,
+  since a cron job or systemd unit cannot answer a UI.
 - **The six in-app screens are reachable**: help (`F1`/`?`), aircraft detail (`Enter`), sort
   (`s`), filters and search (`f`), column chooser (`c`), and watchlist editor (`w`). `Esc`
   cancels, `Enter` applies, and watchlist edits are saved back to disk.
