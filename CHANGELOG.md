@@ -6,6 +6,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **The six in-app screens are reachable**: help (`F1`/`?`), aircraft detail (`Enter`), sort
+  (`s`), filters and search (`f`), column chooser (`c`), and watchlist editor (`w`). `Esc`
+  cancels, `Enter` applies, and watchlist edits are saved back to disk.
+- **The table scrolls** with the arrow keys, `j`/`k`, PageUp/PageDown, and Home/End, with the
+  selected row highlighted (F27).
+- **Alerts are delivered, not just graded**: a level transition or a watchlist match fires the
+  configured channels (terminal bell, desktop notification, webhook, shell command) with
+  per-aircraft cooldowns and quiet hours. Delivery runs on the fetch thread so a slow webhook
+  cannot stall the display; the bell is handed back to the UI thread, since it is a curses call.
+- **Sighting history**: each track is summarised (closest approach, highest altitude, fastest
+  speed, squawks seen, whether it declared an emergency) and written to SQLite when the track
+  ends, with retention pruning at startup.
+- **The remaining filters apply**: `hide_ground`, `include_nonicao`, and the altitude band now
+  affect what you see, alongside a live text search across callsign, hex, registration, owner,
+  and type.
 - `src/adsbtui/__main__.py`: the console entry point. `adsbtui` launches the curses TUI;
   `--check`, `--once`, `--watch N`, `--batch`, and `--headless` select the non-interactive
   modes. Exit codes: 0 clean, 2 configuration/terminal error, 4 source unreachable.

@@ -290,21 +290,25 @@ your receiver's own setup versus what `adsbtui` does for you.
 
 ## Keyboard shortcuts
 
-These are the only bindings currently wired into the running app's event loop:
-
 | Key | Action |
 |---|---|
-| `q` / `Q` / `F10` | Quit |
+| `F1` / `?` | Help overlay listing every binding |
+| `Enter` / `d` | Detail pane for the selected aircraft (every field the feed provides) |
+| `up` / `down`, `k` / `j` | Move the selection |
+| `PgUp` / `PgDn`, `Home` / `End` | Scroll the table |
+| `s` / `F5` | Sort screen (distance, altitude, callsign, and direction) |
+| `S` | Reverse the current sort without opening a screen |
+| `f` / `F4` / `/` | Filters and search: ground traffic, non-ICAO addresses, altitude band, text search |
+| `c` / `F6` | Column chooser: which columns, in what order, plus density and border style |
+| `w` / `F7` | Watchlist editor: add, remove, and enable/disable patterns; `w` inside it quick-adds the selected aircraft |
+| `u` | Cycle units: imperial, metric, aviation |
 | `p` / `P` | Pause / resume the display (the fetch thread keeps running in the background) |
-| `+` / `=` | Increase the filter radius by 1 mile |
-| `-` / `_` | Decrease the filter radius by 1 mile (minimum 1 mile) |
+| `+` / `-` | Grow / shrink the filter radius by 1 mile |
+| `q` / `Q` / `F10` | Quit |
 | *(terminal resize)* | Redraws at the new size automatically |
 
-A help overlay, a read-only aircraft detail pane, and editor screens for sort order, column
-selection, filters, and the watchlist all exist as complete, individually unit-tested modules
-under `src/adsbtui/ui/screens/` — but none of them is bound to a key yet in `ui/app.py`'s event
-loop, so they aren't reachable from a running session in this snapshot. See
-[Known limitations](#known-limitations).
+Inside any screen, `Esc` cancels and `Enter` applies. Changes made this way affect the running
+session; only watchlist edits are written back to disk.
 
 ---
 
@@ -369,24 +373,13 @@ quiet_hours = "22:00-07:00"
 
 Being direct about the state of this snapshot:
 
-- **The table does not scroll.** Aircraft beyond the visible rows are tracked, counted, and
-  present in every non-interactive output format, but there is no cursor or scrolling in the
-  curses table yet, so a very busy sky shows only the closest screenful.
-- **Most of the interactive UI is quit/pause/radius-only.** The help overlay, aircraft detail
-  pane, and sort/filter/column-chooser/watchlist-editor screens exist as complete, unit-tested
-  components but aren't bound to any key in `ui/app.py`'s event loop yet.
-- **Alert *dispatch* (bell/desktop/webhook/shell command) is not yet wired in.** Alert *grading*
-  (the color-coded rows and `alert_level` field) works today; actually ringing a bell, popping a
-  notification, POSTing a webhook, or running a command on an alert transition is implemented in
-  `dispatch.Dispatcher` but not yet called from anywhere runnable.
-- **The watchlist matcher and SQLite history log are not yet wired in**, for the same reason —
-  both are complete, tested modules (`watchlist.py`, `history.py`) with no caller yet in the fetch
-  loop or CLI runners.
-- **`filter.hide_ground`/`include_nonicao`/`min_alt_ft`/`max_alt_ft` aren't applied yet.** Only
-  `filter.radius` and `filter.proximity` affect what you see today; the other four are validated
-  config and drive the (also not-yet-wired) Filters screen's widget state.
+- **The non-interactive modes are thinner than the TUI.** `--headless` currently fetches and
+  logs but does not dispatch alerts or write history (the TUI does both); `--batch` emits
+  arrival/departure lines only.
 - **No in-app settings UI or setup wizard.** Configure by hand-editing the TOML file or via CLI
-  flags/environment variables.
+  flags/environment variables. Sort order, filters, visible columns, units, and the watchlist
+  *are* editable live from inside the TUI, but only the watchlist is persisted to disk — the
+  rest revert to your config file on restart.
 - **No automatic FAA/tar1090 registry downloader.** You provide the CSV yourself — see
   [Owner lookup](#owner-lookup).
 - **Non-US and military/LADD/PIA aircraft only get an owner if your receiver's own enrichment

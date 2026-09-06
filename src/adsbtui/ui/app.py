@@ -32,15 +32,23 @@ import contextlib
 import curses
 import logging
 import queue
+import sqlite3
 import threading
 import time
 
-from adsbtui import __version__, alerts, geo, normalize, tracker
+from adsbtui import __version__, alerts, dispatch, geo, history, normalize, tracker
+from adsbtui import watchlist as watchlist_mod
 from adsbtui.config import Config
 from adsbtui.model import Aircraft, AlertLevel, Snapshot
 from adsbtui.sources import Source, SourceError
 from adsbtui.ui import bars, theme
 from adsbtui.ui import columns as columns_mod
+from adsbtui.ui.screens.columns import ColumnsScreen
+from adsbtui.ui.screens.detail import DetailScreen
+from adsbtui.ui.screens.filters import FiltersScreen
+from adsbtui.ui.screens.help import HelpScreen
+from adsbtui.ui.screens.sort import SortScreen
+from adsbtui.ui.screens.watchlist import WatchlistScreen
 
 #: Below this width or height, the normal table layout is abandoned for a single centered
 #: "Terminal too small" message -- there simply is not room to draw anything useful, and
@@ -60,6 +68,33 @@ BACKOFF_BASE_S = 1.0
 _TOP_ROWS = 4
 
 _LOGGER_NAME = "adsbtui"
+
+#: Action name -> key label, rendered in the key bar and the help overlay. Single source
+#: of truth: the event loop's key handling and this table must agree, so the bar can never
+#: advertise a key that does nothing.
+#: Order matters: the key bar is truncated to fit the terminal width, so the two keys a
+#: user must never be unable to find -- how to get help and how to get out -- come first.
+KEYMAP: dict[str, str] = {
+    "help": "F1/?",
+    "quit": "q",
+    "detail": "Enter",
+    "sort": "s",
+    "filters": "f",
+    "columns": "c",
+    "watchlist": "w",
+    "pause": "p",
+    "units": "u",
+    "radius": "+/-",
+}
+
+#: Sort keys offered by the Sort screen, as (value, label) pairs.
+SORT_KEYS: list[tuple[str, str]] = [
+    ("distance", "Distance"),
+    ("altitude", "Altitude"),
+    ("callsign", "Callsign"),
+]
+
+_UNIT_SYSTEMS = ["imperial", "metric", "aviation"]
 
 
 def _is_emergency(cfg: Config, aircraft: Aircraft) -> bool:
@@ -140,6 +175,52 @@ class App:
         self._prev_messages_time: float | None = None
         self._msg_rate: float | None = None
 
+        # --- watchlist -------------------------------------------------------------
+        self._watch_entries: list[watchlist_mod.WatchEntry] = []
+        if cfg.watchlist.path:
+            try:
+                self._watch_entries = watchlist_mod.load(cfg.watchlist.path)
+            except OSError as exc:
+                self._logger.warning("could not load watchlist %s: %s", cfg.watchlist.path, exc)
+
+        # --- alert dispatch --------------------------------------------------------
+        # The bell is the one channel that must happen on the main thread (curses.beep()
+        # is a curses call, and the fetch thread must never make one). So the dispatcher,
+        # which runs on the fetch thread to keep webhook/subprocess latency off the UI,
+        # gets a bell_fn that only sets a flag; the event loop turns it into an actual beep.
+        self._bell_pending = threading.Event()
+        self._dispatcher = dispatch.Dispatcher(
+            cfg.alerts, bell_fn=lambda _event: self._bell_pending.set()
+        )
+        #: hex -> the level it was last graded at, so transitions can be detected.
+        self._prev_levels: dict[str, AlertLevel] = {}
+
+        # --- sighting history ------------------------------------------------------
+        self._history_db = cfg.history.db or ""
+        if self._history_db:
+            try:
+                history.ensure_schema(self._history_db)
+                removed = history.prune_old(
+                    self._history_db, cfg.history.retention_days, time.time()
+                )
+                if removed:
+                    self._logger.info("pruned %d sighting(s) past retention", removed)
+            except sqlite3.Error as exc:
+                self._logger.warning(
+                    "history disabled, could not open %s: %s", self._history_db, exc
+                )
+                self._history_db = ""
+        #: hex -> running per-track aggregates, accumulated while a track is live and
+        #: written out as one row when the track finally drops.
+        self._track_stats: dict[str, dict] = {}
+
+        # --- live UI state that screens mutate -------------------------------------
+        self._search_text = ""
+        self._cursor = 0
+        self._scroll = 0
+        self._screen = None
+        self._screen_name: str | None = None
+
     # ------------------------------------------------------------------
     # Background fetch thread -- NEVER call any curses function from here.
     # ------------------------------------------------------------------
@@ -185,13 +266,14 @@ class App:
                     ac.cpa_distance_mi = cpa_dist
                     ac.cpa_seconds = cpa_secs
 
-                radius = self.cfg.filter.radius
-                ignore_radius_for_emergency = self.cfg.alerts.emergency_ignore_radius
-                filtered: list[Aircraft] = []
                 for ac in aircraft_list:
-                    within_radius = ac.distance_mi is not None and ac.distance_mi <= radius
-                    if within_radius or ignore_radius_for_emergency and _is_emergency(self.cfg, ac):
-                        filtered.append(ac)
+                    ac.is_watched = (
+                        watchlist_mod.matches(ac, self._watch_entries) is not None
+                        if self._watch_entries
+                        else False
+                    )
+
+                filtered = self._apply_filters(aircraft_list)
 
                 current_batch = {ac.hex: ac for ac in filtered}
                 tracked = tracker.update_tracks(
@@ -216,6 +298,9 @@ class App:
                         cpa_min_gs_kt=self.cfg.alerts.cpa_min_gs_kt,
                     )
 
+                self._dispatch_alerts(graded)
+                self._record_tracks(tracked, fetched_at)
+
                 ordered = sort_aircraft(
                     graded, self.cfg.display.sort_key, self.cfg.display.sort_reverse
                 )
@@ -234,6 +319,136 @@ class App:
                 self._publish(out_queue, (None, [], str(exc)))
                 stop_event.wait(backoff)
                 backoff = min(backoff * 2, self.cfg.source.backoff_max_s)
+
+    def _apply_filters(self, aircraft_list: list[Aircraft]) -> list[Aircraft]:
+        """Apply every [filter] setting plus the live search box.
+
+        An aircraft graded as an emergency bypasses the radius check (and only that check)
+        when alerts.emergency_ignore_radius is set: a 7700 squawk 20 miles out is exactly
+        the thing you do not want filtered off the screen.
+        """
+        f = self.cfg.filter
+        ignore_radius_for_emergency = self.cfg.alerts.emergency_ignore_radius
+        needle = self._search_text.strip().lower()
+
+        kept: list[Aircraft] = []
+        for ac in aircraft_list:
+            is_emergency = _is_emergency(self.cfg, ac)
+
+            within_radius = ac.distance_mi is not None and ac.distance_mi <= f.radius
+            if not within_radius and not (ignore_radius_for_emergency and is_emergency):
+                continue
+            if f.hide_ground and ac.on_ground:
+                continue
+            if not f.include_nonicao and not ac.is_icao:
+                continue
+            if ac.altitude_ft is not None and not (f.min_alt_ft <= ac.altitude_ft <= f.max_alt_ft):
+                continue
+            if needle and not self._matches_search(ac, needle):
+                continue
+            kept.append(ac)
+        return kept
+
+    @staticmethod
+    def _matches_search(ac: Aircraft, needle: str) -> bool:
+        haystack = (ac.flight, ac.hex, ac.registration, ac.owner_name, ac.type_code)
+        return any(field and needle in field.lower() for field in haystack)
+
+    def _dispatch_alerts(self, graded: list[Aircraft]) -> None:
+        """Fire alert notifications for level transitions and watchlist matches.
+
+        Runs on the fetch thread so a slow webhook or notify-send can never stall the
+        display; the bell is the exception and is handed to the main thread via a flag.
+        """
+        seen: set[str] = set()
+        for ac in graded:
+            seen.add(ac.hex)
+            previous = self._prev_levels.get(ac.hex, AlertLevel.NONE)
+            event = dispatch.build_event(
+                ac, ac.alert_level, previous, self.cfg.alerts.events
+            )
+            if event is None and ac.is_watched and previous == AlertLevel.NONE:
+                # A watchlist hit is not an AlertLevel transition, so it goes through the
+                # same gate under its own event name.
+                event = dispatch.build_event(
+                    ac,
+                    ac.alert_level,
+                    previous,
+                    self.cfg.alerts.events,
+                    event_name_override="watchlist",
+                )
+            if event is not None:
+                try:
+                    self._dispatcher.maybe_fire(event)
+                except Exception as exc:  # never let a notification kill the fetch thread
+                    self._logger.warning("alert dispatch failed for %s: %s", ac.hex, exc)
+            self._prev_levels[ac.hex] = ac.alert_level
+
+        for gone in [h for h in self._prev_levels if h not in seen]:
+            del self._prev_levels[gone]
+
+    def _record_tracks(self, tracked: dict[str, Aircraft], now: float) -> None:
+        """Accumulate per-track aggregates, and write a sighting row when a track drops.
+
+        tracker.update_tracks() ages a vanished aircraft out after the linger window, so
+        "no longer in tracked" is exactly the moment its track ended and the summary can
+        be persisted.
+        """
+        if not self._history_db:
+            return
+
+        for hexid, ac in tracked.items():
+            stats = self._track_stats.get(hexid)
+            if stats is None:
+                stats = {
+                    "first_seen": ac.first_seen or now,
+                    "min_distance_mi": None,
+                    "min_distance_at": None,
+                    "max_altitude_ft": None,
+                    "max_gs_kt": None,
+                    "squawks": set(),
+                    "had_emergency": False,
+                    "aircraft": ac,
+                }
+                self._track_stats[hexid] = stats
+
+            stats["aircraft"] = ac
+            stats["last_seen"] = ac.last_seen or now
+            if ac.distance_mi is not None and (
+                stats["min_distance_mi"] is None or ac.distance_mi < stats["min_distance_mi"]
+            ):
+                stats["min_distance_mi"] = ac.distance_mi
+                stats["min_distance_at"] = now
+            if ac.altitude_ft is not None and (
+                stats["max_altitude_ft"] is None or ac.altitude_ft > stats["max_altitude_ft"]
+            ):
+                stats["max_altitude_ft"] = ac.altitude_ft
+            if ac.ground_speed_kt is not None and (
+                stats["max_gs_kt"] is None or ac.ground_speed_kt > stats["max_gs_kt"]
+            ):
+                stats["max_gs_kt"] = ac.ground_speed_kt
+            if ac.squawk:
+                stats["squawks"].add(ac.squawk)
+            if ac.alert_level == AlertLevel.EMERGENCY:
+                stats["had_emergency"] = True
+
+        for hexid in [h for h in self._track_stats if h not in tracked]:
+            stats = self._track_stats.pop(hexid)
+            try:
+                history.record_close(
+                    self._history_db,
+                    stats["aircraft"],
+                    first_seen=stats["first_seen"],
+                    last_seen=stats.get("last_seen", now),
+                    min_distance_mi=stats["min_distance_mi"],
+                    min_distance_at=stats["min_distance_at"],
+                    max_altitude_ft=stats["max_altitude_ft"],
+                    max_gs_kt=stats["max_gs_kt"],
+                    squawks_seen=sorted(stats["squawks"]),
+                    had_emergency=stats["had_emergency"],
+                )
+            except sqlite3.Error as exc:
+                self._logger.warning("could not record sighting for %s: %s", hexid, exc)
 
     @staticmethod
     def _publish(
@@ -370,13 +585,7 @@ class App:
         title = bars.title_bar_text(width, __version__, paused, display.units, config_path)
         self._safe_addstr(stdscr, 0, 0, title, header_attr)
 
-        keymap = {
-            "quit": "q",
-            "pause": "p",
-            "radius plus": "+",
-            "radius minus": "-",
-        }
-        key_line = bars.key_bar_text(width, keymap)
+        key_line = bars.key_bar_text(width, KEYMAP)
         self._safe_addstr(stdscr, 1, 0, key_line, normal_attr)
 
         border_style = display.borders
@@ -393,10 +602,21 @@ class App:
         bottom_rows = 1 if display.status_bar else 0
         table_height = max(0, height - _TOP_ROWS - bottom_rows)
 
-        for i, ac in enumerate(aircraft_list[:table_height]):
+        # Keep the cursor inside the list and the viewport around the cursor, so the table
+        # scrolls instead of silently hiding everything past the first screenful.
+        self._clamp_view(len(aircraft_list), table_height)
+        visible = aircraft_list[self._scroll : self._scroll + table_height]
+
+        for i, ac in enumerate(visible):
             row_text = columns_mod.format_row(ac, columns, widths, display.units, ascii_only)
-            attr = self._attrs.get(self._row_style_name(ac), normal_attr)
+            if self._scroll + i == self._cursor and aircraft_list:
+                attr = self._attrs.get("selected", curses.A_REVERSE)
+            else:
+                attr = self._attrs.get(self._row_style_name(ac), normal_attr)
             self._safe_addstr(stdscr, _TOP_ROWS + i, 0, row_text, attr)
+
+        if self._screen is not None:
+            self._draw_screen_overlay(stdscr, width, height)
 
         if display.status_bar:
             age = None if last_success_at is None else max(0.0, time.time() - last_success_at)
@@ -414,6 +634,140 @@ class App:
 
         stdscr.noutrefresh()
         curses.doupdate()
+
+    def _page_size(self, stdscr) -> int:
+        """Rows of table visible right now, for PageUp/PageDown."""
+        height, _ = stdscr.getmaxyx()
+        bottom_rows = 1 if self.cfg.display.status_bar else 0
+        return max(1, height - _TOP_ROWS - bottom_rows)
+
+    def _clamp_view(self, total: int, table_height: int) -> None:
+        """Keep the cursor within the list and the scroll window around the cursor."""
+        if total == 0:
+            self._cursor = 0
+            self._scroll = 0
+            return
+        self._cursor = max(0, min(self._cursor, total - 1))
+        if table_height <= 0:
+            self._scroll = 0
+            return
+        if self._cursor < self._scroll:
+            self._scroll = self._cursor
+        elif self._cursor >= self._scroll + table_height:
+            self._scroll = self._cursor - table_height + 1
+        self._scroll = max(0, min(self._scroll, max(0, total - table_height)))
+
+    def _draw_screen_overlay(self, stdscr, width: int, height: int) -> None:
+        """Draw the active screen centered over the table, inside a bordered box.
+
+        The screen itself only produces plain strings (that is what makes every screen
+        unit-testable without a terminal); all the curses geometry lives here.
+        """
+        screen = self._screen
+        if screen is None:
+            return
+
+        box_w = max(20, min(width - 4, 76))
+        inner_w = box_w - 4
+        lines = screen.render_lines(inner_w, max(1, height - 8))
+        box_h = min(height - 2, len(lines) + 4)
+        top = max(0, (height - box_h) // 2)
+        left = max(0, (width - box_w) // 2)
+
+        glyph = theme.glyphs(self.cfg.display.borders)
+        h, v = glyph.get("h") or "-", glyph.get("v") or "|"
+        tl = glyph.get("tl") or "+"
+        tr = glyph.get("tr") or "+"
+        bl = glyph.get("bl") or "+"
+        br = glyph.get("br") or "+"
+        border_attr = self._attrs.get("header", curses.A_BOLD)
+        body_attr = self._attrs.get("normal", curses.A_NORMAL)
+
+        title = f" {screen.title} "[: max(0, box_w - 4)]
+        top_line = tl + h + title + h * max(0, box_w - 3 - len(title) - 1) + tr
+        self._safe_addstr(stdscr, top, left, top_line[:box_w], border_attr)
+
+        for i in range(box_h - 2):
+            text = lines[i] if i < len(lines) else ""
+            row = v + " " + text.ljust(inner_w)[:inner_w] + " " + v
+            self._safe_addstr(stdscr, top + 1 + i, left, row[:box_w], body_attr)
+
+        bottom_line = (bl + h * (box_w - 2) + br)[:box_w]
+        self._safe_addstr(stdscr, top + box_h - 1, left, bottom_line, border_attr)
+
+    def _selected_aircraft(self, aircraft_list: list[Aircraft]) -> Aircraft | None:
+        if not aircraft_list:
+            return None
+        index = max(0, min(self._cursor, len(aircraft_list) - 1))
+        return aircraft_list[index]
+
+    def _open_screen(self, name: str, aircraft_list: list[Aircraft]) -> None:
+        """Construct and push the named screen. Unknown names are ignored."""
+        display = self.cfg.display
+        if name == "help":
+            self._screen = HelpScreen(KEYMAP, __version__)
+        elif name == "detail":
+            ac = self._selected_aircraft(aircraft_list)
+            if ac is None:
+                return
+            self._screen = DetailScreen(ac, display.units)
+        elif name == "sort":
+            self._screen = SortScreen(SORT_KEYS, display.sort_key, display.sort_reverse)
+        elif name == "filters":
+            f = self.cfg.filter
+            self._screen = FiltersScreen(
+                {
+                    "hide_ground": f.hide_ground,
+                    "include_nonicao": f.include_nonicao,
+                    "min_alt_ft": f.min_alt_ft,
+                    "max_alt_ft": f.max_alt_ft,
+                },
+                search_text=self._search_text,
+            )
+        elif name == "columns":
+            self._screen = ColumnsScreen(display.columns, display.density, display.borders)
+        elif name == "watchlist":
+            self._screen = WatchlistScreen(
+                self._watch_entries, self._selected_aircraft(aircraft_list)
+            )
+        self._screen_name = name if self._screen is not None else None
+
+    def _close_screen(self) -> None:
+        """Pop the active screen, applying whatever it produced back onto live config.
+
+        Every screen keeps its own committed result (Escape leaves it untouched), so
+        reading result() unconditionally here is safe: a cancelled screen returns exactly
+        what it was given.
+        """
+        screen, name = self._screen, self._screen_name
+        self._screen = None
+        self._screen_name = None
+        if screen is None:
+            return
+
+        display = self.cfg.display
+        if name == "sort":
+            display.sort_key, display.sort_reverse = screen.result()
+        elif name == "filters":
+            result = screen.result()
+            f = self.cfg.filter
+            f.hide_ground = bool(result.get("hide_ground", f.hide_ground))
+            f.include_nonicao = bool(result.get("include_nonicao", f.include_nonicao))
+            f.min_alt_ft = int(result.get("min_alt_ft", f.min_alt_ft))
+            f.max_alt_ft = int(result.get("max_alt_ft", f.max_alt_ft))
+            self._search_text = str(result.get("search_text", self._search_text) or "")
+        elif name == "columns":
+            result = screen.result()
+            display.columns = list(result.get("columns", display.columns))
+            display.density = str(result.get("density", display.density))
+            display.borders = str(result.get("borders", display.borders))
+        elif name == "watchlist":
+            self._watch_entries = list(screen.result())
+            if self.cfg.watchlist.path:
+                try:
+                    watchlist_mod.save(self.cfg.watchlist.path, self._watch_entries)
+                except OSError as exc:
+                    self._logger.warning("could not save watchlist: %s", exc)
 
     def _update_msg_rate(self, snapshot: Snapshot) -> None:
         """Update the rolling messages/sec estimate from two successive snapshots'
@@ -472,22 +826,68 @@ class App:
                 self._draw(stdscr, aircraft_list, last_error, last_success_at, paused)
                 dirty = False
 
+            # The bell fires here rather than on the fetch thread: curses.beep() is a
+            # curses call, and only this thread may make one.
+            if self._bell_pending.is_set():
+                self._bell_pending.clear()
+                if self.cfg.alerts.bell:
+                    with contextlib.suppress(curses.error):
+                        curses.beep()
+
             key = stdscr.getch()
             if key == -1:
                 continue
             dirty = True
 
-            if key in (ord("q"), ord("Q"), curses.KEY_F10):
-                return 0
             if key == curses.KEY_RESIZE:
                 continue
-            if key in (ord("p"), ord("P")):
+
+            # A screen, when open, gets first refusal on every key: it owns the keyboard
+            # until it says it is done.
+            if self._screen is not None:
+                if self._screen.handle_key(key) == "close":
+                    self._close_screen()
+                continue
+
+            if key in (ord("q"), ord("Q"), curses.KEY_F10):
+                return 0
+
+            if key in (ord("?"), curses.KEY_F1):
+                self._open_screen("help", aircraft_list)
+            elif key in (curses.KEY_ENTER, ord("\n"), ord("\r"), ord("d")):
+                self._open_screen("detail", aircraft_list)
+            elif key in (ord("/"), curses.KEY_F3, ord("f"), curses.KEY_F4):
+                self._open_screen("filters", aircraft_list)
+            elif key in (ord("s"), curses.KEY_F5):
+                self._open_screen("sort", aircraft_list)
+            elif key in (ord("S"),):
+                self.cfg.display.sort_reverse = not self.cfg.display.sort_reverse
+            elif key in (ord("c"), curses.KEY_F6):
+                self._open_screen("columns", aircraft_list)
+            elif key in (ord("w"), curses.KEY_F7):
+                self._open_screen("watchlist", aircraft_list)
+            elif key in (ord("p"), ord("P")):
                 paused = not paused
+            elif key == ord("u"):
+                current = self.cfg.display.units
+                index = _UNIT_SYSTEMS.index(current) if current in _UNIT_SYSTEMS else 0
+                self.cfg.display.units = _UNIT_SYSTEMS[(index + 1) % len(_UNIT_SYSTEMS)]
+            elif key in (curses.KEY_UP, ord("k")):
+                self._cursor -= 1
+            elif key in (curses.KEY_DOWN, ord("j")):
+                self._cursor += 1
+            elif key == curses.KEY_HOME:
+                self._cursor = 0
+            elif key == curses.KEY_END:
+                self._cursor = max(0, len(aircraft_list) - 1)
+            elif key == curses.KEY_PPAGE:
+                self._cursor -= max(1, self._page_size(stdscr))
+            elif key == curses.KEY_NPAGE:
+                self._cursor += max(1, self._page_size(stdscr))
             elif key in (ord("+"), ord("=")):
                 self.cfg.filter.radius += 1.0
             elif key in (ord("-"), ord("_")):
                 self.cfg.filter.radius = max(1.0, self.cfg.filter.radius - 1.0)
-            # Future keys are handled here as this if/elif chain grows.
 
     def run(self, stdscr) -> int:
         """Entry point for curses.wrapper(app.run). Returns the process exit code."""

@@ -45,12 +45,12 @@ milestones land: `Open`, `Fixed (M#)`, or `Won't fix: reason`.
 | F24 | 66, 100 | "Heading"/"Direction" show ground track, not bearing from home | R | B13 | Fixed (M6) |
 | F25 | 157 | Fixed 132-column row cut at terminal width; headline columns invisible under 132 cols | D | B06 | Fixed (M3) |
 | F26 | 174-176 | `KEY_RESIZE` discarded; only lowercase `q` quits; Ctrl-C dumps a traceback | R | B04, B05 | Fixed (M3) |
-| F27 | 146, 106 | Aircraft beyond visible rows silently dropped; footer count is lifetime, not shown live | R | B15, B05 | Partly fixed (M3): the count is live and aircraft beyond the visible rows are no longer silently dropped from the data, but the table does not scroll yet. |
+| F27 | 146, 106 | Aircraft beyond visible rows silently dropped; footer count is lifetime, not shown live | R | B15, B05 | Fixed (M4): the table scrolls with a selectable cursor, and the status line count is live. |
 | F28 | 56-92 | `fetch_aircraft_data` mixes I/O, parsing, enrichment, formatting; untestable; no tests/packaging | R | B09 | Fixed (M1) |
 | F29 | 31 | NAME kept with 50-char padding; whitespace-only names render blank; long names truncated | D | B03, B06 | Fixed (M1) |
 | F30 | repo | 20.7 MB `MASTER.csv` committed, undated, 3-column subset | D | B22 | Fixed (M0) |
 | F31 | README 163-165 | "Non-US"/"type needs paid API"/"military-LADD-PIA" limitations are solvable for free | D (docs) | B22-B25 | Partly fixed (M2): the receiver's own enrichment fields are now read, covering non-US aircraft and type when the feed provides them. An automatic registry download is still deferred. |
-| F32 | README 155 | Claims unique-aircraft logging; nothing but errors is logged | R | B29, B33 | Partly fixed (M10): the false claim is gone from the README. Sighting history exists in history.py but is not yet wired into the running app. |
+| F32 | README 155 | Claims unique-aircraft logging; nothing but errors is logged | R | B29, B33 | Fixed (M9): each closed track is now summarised into a SQLite sightings table, and the README describes what is actually recorded. |
 | F33 | 157-162 | Untrusted JSON strings reach `addstr` unfiltered: NUL raises uncaught `ValueError` | R | B06 | Fixed (M1) |
 | F34 | 58 | No response size cap or wall-clock bound on the fetch | R | B03, B04 | Fixed (M1) |
 

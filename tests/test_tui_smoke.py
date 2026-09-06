@@ -135,7 +135,10 @@ def test_renders_expected_chrome_and_drops_columns_when_narrow():
     narrow_clean = _strip_ansi(narrow)
 
     assert "ADSB-TUI" in wide_clean
-    assert "Quit" in wide_clean  # the key bar rendered
+    # The key bar is truncated to the terminal width, so the keys a user cannot afford to
+    # lose -- help and quit -- must survive that truncation on a normal-width terminal.
+    assert "Help" in wide_clean
+    assert "Quit" in wide_clean
     assert "FLIGHT" in wide_clean and "FLIGHT" in narrow_clean
 
     # Lower-priority columns must be dropped rather than truncated on a narrow terminal.
