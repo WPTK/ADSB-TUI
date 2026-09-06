@@ -38,10 +38,14 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURE = os.path.join(REPO_ROOT, "tests", "fixtures", "aircraft.json")
 ENTRY = os.path.join(REPO_ROOT, "adsbtui.py")
 
-#: Long enough for the first fetch to land and the first frame to paint.
-STARTUP_S = 2.0
-#: Generous upper bound on how long a clean shutdown may take.
-EXIT_TIMEOUT_S = 6.0
+#: Text that only appears once the first frame has painted, which is the real signal that
+#: curses is initialised and the event loop is reading keys.
+READY_MARKER = "ADSB-TUI"
+#: Upper bound on waiting for that first frame. Generous because a loaded CI runner can be
+#: an order of magnitude slower than a developer machine.
+STARTUP_TIMEOUT_S = 30.0
+#: Upper bound on how long a clean shutdown may take after the quit key is sent.
+EXIT_TIMEOUT_S = 20.0
 
 
 def _run_tui(cols: int, rows: int, keys: bytes) -> tuple[str, int | str]:
@@ -66,9 +70,29 @@ def _run_tui(cols: int, rows: int, keys: bytes) -> tuple[str, int | str]:
         )
 
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
-    time.sleep(STARTUP_S)
 
+    # Wait for the app to actually paint before sending it anything. A fixed sleep here is
+    # what made this test flaky: on a loaded runner the app had not finished curses init
+    # and its first fetch within the timeout, so the quit key arrived before the event
+    # loop was reading and the process then ran until the harness killed it. Polling for
+    # the first frame is both faster on a quick machine and reliable on a slow one.
     out = b""
+    ready = False
+    deadline = time.time() + STARTUP_TIMEOUT_S
+    while time.time() < deadline:
+        readable, _, _ = select.select([fd], [], [], 0.2)
+        if readable:
+            try:
+                chunk = os.read(fd, 65536)
+            except OSError:
+                break
+            if not chunk:
+                break
+            out += chunk
+            if READY_MARKER in out.decode("utf-8", "replace"):
+                ready = True
+                break
+
     os.write(fd, keys)
     deadline = time.time() + EXIT_TIMEOUT_S
     while time.time() < deadline:
@@ -83,6 +107,8 @@ def _run_tui(cols: int, rows: int, keys: bytes) -> tuple[str, int | str]:
             out += chunk
 
     text = out.decode("utf-8", "replace")
+    if not ready:
+        text += f"\n[test harness: {READY_MARKER!r} never appeared within {STARTUP_TIMEOUT_S}s]"
     try:
         os.kill(pid, 0)
         reaped, status = os.waitpid(pid, os.WNOHANG)
