@@ -44,8 +44,11 @@ READY_MARKER = "ADSB-TUI"
 #: Upper bound on waiting for that first frame. Generous because a loaded CI runner can be
 #: an order of magnitude slower than a developer machine.
 STARTUP_TIMEOUT_S = 30.0
-#: Upper bound on how long a clean shutdown may take after the quit key is sent.
-EXIT_TIMEOUT_S = 20.0
+#: Upper bound on how long a clean shutdown may take after the quit key is sent. Generous
+#: for the same reason as STARTUP_TIMEOUT_S: a shared/loaded CI runner (macOS runners in
+#: particular have shown wide variance) can take much longer than a shutdown that is
+#: normally near-instant (a 200ms getch() poll plus a 2s fetch-thread join budget).
+EXIT_TIMEOUT_S = 45.0
 
 
 def _run_tui(cols: int, rows: int, keys: bytes) -> tuple[str, int | str]:
