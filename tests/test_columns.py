@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from adsbtui.model import Aircraft, AlertLevel
 from adsbtui.ui.columns import (
+    _ALERT_TAGS,
     COLUMN_SPECS,
     DEFAULT_COLUMNS,
     compute_widths,
@@ -392,3 +393,59 @@ class TestFormatHeader:
         header_cells = split_by_widths(header, columns, widths, sep)
         row_cells = split_by_widths(row, columns, widths, sep)
         assert len(header_cells) == len(row_cells) == len(columns)
+
+
+def _cell_for(key: str, ac, unit_system: str = "imperial", width: int | None = None) -> str:
+    """Render one aircraft's cell for a single column.
+
+    Defaults to that column's minimum width, which is exactly the width a cell has to
+    survive on a narrow terminal; pass `width` for columns like "owner" whose minimum is
+    only a floor for a value that is normally given far more room.
+    """
+    widths = {key: width if width is not None else COLUMN_SPECS[key].min_width}
+    return format_row(ac, [key], widths, unit_system, ascii_only=True)
+
+
+# ----------------------------------------------------------------------------------
+# Owner fallback and cell-fit regressions found by running the real UI
+# ----------------------------------------------------------------------------------
+
+
+def test_owner_falls_back_to_the_receivers_own_enrichment():
+    """Receivers running readsb with a --db-file already send ownOp, including for non-US
+    aircraft no FAA CSV can cover. Rendering "N/A" while that value sits in the record was
+    a real bug: the detail pane showed the owner while the table did not."""
+    ac = Aircraft(hex="3c6444", is_icao=True, owner_operator="LUFTHANSA")
+    assert "LUFTHANSA" in _cell_for("owner", ac, width=30)
+
+
+def test_owner_prefers_the_local_registry_over_the_feed():
+    ac = Aircraft(hex="a1b2c3", is_icao=True, owner_name="FAA NAME", owner_operator="FEED NAME")
+    assert "FAA NAME" in _cell_for("owner", ac, width=30)
+
+
+def test_owner_is_na_when_nothing_knows_it():
+    assert _cell_for("owner", Aircraft(hex="abc123", is_icao=True), width=30).strip() == "N/A"
+
+
+def test_alert_tags_fit_their_column_without_truncation():
+    """A truncated "OVERH"/"INBOU" reads as a rendering bug rather than a status."""
+    width = COLUMN_SPECS["alert"].min_width
+    for level in AlertLevel:
+        tag = _ALERT_TAGS[level]
+        assert len(tag) <= width, f"{level.value} tag {tag!r} does not fit {width} columns"
+
+
+def test_altitude_and_speed_cells_fit_their_minimum_widths():
+    """Five-digit altitudes and three-digit speeds must not lose their unit suffix."""
+    ac = Aircraft(hex="abc123", is_icao=True, altitude_ft=41000.0, ground_speed_kt=505.0)
+    assert _cell_for("alt", ac).strip() == "41,000ft"
+    assert _cell_for("gs", ac).strip() == "581 mph"
+
+
+def test_ground_traffic_gets_no_closest_approach():
+    ac = Aircraft(
+        hex="abc123", is_icao=True, on_ground=True,
+        cpa_distance_mi=3.1, cpa_seconds=3400.0,
+    )
+    assert _cell_for("cpa", ac).strip() == ""
