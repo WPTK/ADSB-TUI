@@ -92,27 +92,36 @@ def normalize_hex(hex_id: str) -> str | None:
 
 
 def _suffix_for(index: int) -> str:
-    """Map a suffix slot (0..600) to '', a single letter, or a letter pair."""
+    """Map a suffix slot (0..600) to '', a single letter, or a letter pair.
+
+    The slots interleave rather than grouping all single letters before all pairs: each
+    first letter owns a block of 25 -- itself alone, then its 24 pairs -- so the sequence
+    runs '', A, AA, AB, ... AZ, B, BA, ... ZZ. Getting this wrong still yields exactly 601
+    slots and a self-consistent round trip, which is why it has to be checked against real
+    registrations rather than against its own inverse.
+    """
     if index <= 0:
         return ""
     offset = index - 1
-    if offset < len(_LETTERS):
-        return _LETTERS[offset]
-    offset -= len(_LETTERS)
-    return _LETTERS[offset // len(_LETTERS)] + _LETTERS[offset % len(_LETTERS)]
+    first, second = divmod(offset, len(_LETTERS) + 1)
+    letters = _LETTERS[first]
+    if second:
+        letters += _LETTERS[second - 1]
+    return letters
 
 
 def _suffix_index(suffix: str) -> int | None:
     """Inverse of _suffix_for(); None if the suffix is not a legal one."""
     if not suffix:
         return 0
+    stride = len(_LETTERS) + 1
     try:
         if len(suffix) == 1:
-            return _LETTERS.index(suffix) + 1
+            return _LETTERS.index(suffix) * stride + 1
         if len(suffix) == 2:
             first = _LETTERS.index(suffix[0])
             second = _LETTERS.index(suffix[1])
-            return 1 + len(_LETTERS) + first * len(_LETTERS) + second
+            return first * stride + second + 2
     except ValueError:
         return None
     return None
@@ -176,16 +185,27 @@ def hex_from_registration(registration: str) -> str | None:
     if len(digits) == 4 and len(suffix) > 1:
         return None
 
-    suffix_index = _suffix_index(suffix)
-    if suffix_index is None:
-        return None
-
     offset = (int(digits[0]) - 1) * _BLOCK_FIRST_DIGIT
     for level, digit in enumerate(digits[1:4]):
         offset += _SUFFIX_SLOTS + int(digit) * _BLOCK_SIZES[level]
+
     if len(digits) == 5:
         offset += 1 + len(_LETTERS) + int(digits[4])
+    elif len(digits) == 4:
+        # The deepest level has no room for a letter PAIR, so its 35 slots are laid out
+        # flat -- bare, 24 single letters, then a fifth digit -- rather than in the
+        # 25-wide blocks _suffix_index assumes. Using the general inverse here silently
+        # lands on the wrong address.
+        if not suffix:
+            pass
+        elif suffix in _LETTERS:
+            offset += _LETTERS.index(suffix) + 1
+        else:
+            return None
     else:
+        suffix_index = _suffix_index(suffix)
+        if suffix_index is None:
+            return None
         offset += suffix_index
 
     value = N_NUMBER_FIRST_HEX + offset

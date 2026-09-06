@@ -192,3 +192,64 @@ class TestRangeTable:
             assert row.start <= row.end
             assert len(row.iso2) == 2 and row.iso2.isalpha()
             assert row.country
+
+
+# ----------------------------------------------------------------------------------
+# Ground-truth vectors
+# ----------------------------------------------------------------------------------
+
+#: (ICAO hex, N-number) pairs taken from the tar1090 community registry and
+#: double-confirmed: the database agrees with the derivation AND the tail number encodes
+#: back to the same address. They deliberately cover every shape an N-number can take --
+#: bare digits, one trailing letter, two trailing letters, at each digit length -- and both
+#: ends of the allocation.
+#:
+#: These exist because a round-trip test is not enough. The first implementation of the
+#: suffix encoder laid all 24 single letters out before all 576 pairs, instead of giving
+#: each first letter its own block of 25 (A, AA..AZ, B, BA..). That still produces exactly
+#: 601 slots and a perfectly self-consistent inverse, so every round-trip test passed while
+#: three out of four real aircraft got the wrong tail number. Only real pairs catch it.
+REAL_REGISTRATIONS = [
+    ("a00001", "N1"),  # 1 digits, 0 letters
+    ("a00002", "N1A"),  # 1 digits, 1 letters
+    ("a00003", "N1AA"),  # 1 digits, 2 letters
+    ("a00005", "N1AC"),  # 1 digits, 2 letters
+    ("a00034", "N1C"),  # 1 digits, 1 letters
+    ("a0025b", "N10A"),  # 2 digits, 1 letters
+    ("a0025c", "N10AA"),  # 2 digits, 2 letters
+    ("a0025d", "N10AB"),  # 2 digits, 2 letters
+    ("a00274", "N10B"),  # 2 digits, 1 letters
+    ("a004b3", "N100"),  # 3 digits, 0 letters
+    ("a004b4", "N100A"),  # 3 digits, 1 letters
+    ("a004b5", "N100AA"),  # 3 digits, 2 letters
+    ("a004b6", "N100AB"),  # 3 digits, 2 letters
+    ("a004cd", "N100B"),  # 3 digits, 1 letters
+    ("a0070d", "N1000A"),  # 4 digits, 1 letters
+    ("a00725", "N10000"),  # 5 digits, 0 letters
+    ("a00726", "N10001"),  # 5 digits, 0 letters
+    ("a0072f", "N1001"),  # 4 digits, 0 letters
+    ("a00730", "N1001A"),  # 4 digits, 1 letters
+    ("a00775", "N1003"),  # 4 digits, 0 letters
+    ("a0086a", "N101"),  # 3 digits, 0 letters
+    ("a029d9", "N11"),  # 2 digits, 0 letters
+    ("a05158", "N12"),  # 2 digits, 0 letters
+    ("a18d50", "N2"),  # 1 digits, 0 letters
+]
+
+
+@pytest.mark.parametrize("hex_id,expected", REAL_REGISTRATIONS)
+def test_derives_real_registrations(hex_id, expected):
+    assert registration_from_hex(hex_id) == expected
+
+
+@pytest.mark.parametrize("hex_id,expected", REAL_REGISTRATIONS)
+def test_encodes_real_registrations_back_to_their_address(hex_id, expected):
+    assert hex_from_registration(expected) == hex_id
+
+
+def test_suffix_blocks_interleave_rather_than_grouping():
+    """The sequence runs A, AA, AB ... AZ, B -- not A, B ... Z, AA, AB."""
+    got = [registration_from_hex(hex(0xA004B3 + n)[2:]) for n in range(28)]
+    assert got[:4] == ["N100", "N100A", "N100AA", "N100AB"]
+    assert got[25] == "N100AZ"
+    assert got[26] == "N100B"

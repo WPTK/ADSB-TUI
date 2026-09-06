@@ -168,7 +168,10 @@ class TestEnricherPriority:
 
         assert info.owner == "CSV ONLY OWNER"
         assert info.sources["owner"] == "csv"
-        assert info.registration == "N100CE"  # nothing but the address knew this one
+        # Verified against the tar1090 community registry, which independently records
+        # A00500 as N100DA. The value here was previously N100CE, derived from a suffix
+        # encoder that laid single letters and pairs out in the wrong order.
+        assert info.registration == "N100DA"  # nothing but the address knew this one
         assert info.sources["registration"] == "derived"
 
     def test_order_is_configurable(self, registry_db):
