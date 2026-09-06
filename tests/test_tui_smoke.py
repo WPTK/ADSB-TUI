@@ -11,18 +11,23 @@ Skipped on platforms without pty (Windows).
 
 from __future__ import annotations
 
-import fcntl
 import os
-import pty
 import re
 import select
 import signal
 import struct
 import sys
-import termios
 import time
 
 import pytest
+
+# These modules are POSIX-only, and a plain "import fcntl" would fail at COLLECTION time
+# on Windows -- before pytest ever evaluates a skipif mark, which only guards execution.
+# importorskip raises Skipped during collection instead, so the whole module is reported
+# as skipped rather than erroring the run.
+fcntl = pytest.importorskip("fcntl", reason="pty-based TUI smoke tests need POSIX")
+pty = pytest.importorskip("pty", reason="pty-based TUI smoke tests need POSIX")
+termios = pytest.importorskip("termios", reason="pty-based TUI smoke tests need POSIX")
 
 pytestmark = pytest.mark.skipif(
     not hasattr(os, "fork") or sys.platform == "win32",
