@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+*.log
+*.sqlite
+*.sqlite-journal
+config.toml
+MASTER.csv
+.pytest_cache/
+.ruff_cache/
