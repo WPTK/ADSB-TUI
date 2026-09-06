@@ -7,13 +7,10 @@ your location, projects a closest-point-of-approach for aircraft heading your wa
 table by how alarmed you should be — all without ever blocking the display on the network.
 
 > **Status:** this is a ground-up rewrite of the original 181-line `adsbtui.py` script into a
-> tested package (see `AUDIT.md`/`CHANGELOG.md` for why). The config loader, data pipeline, curses
-> table, alert grading, and the `--once`/`--watch`/`--headless`/`--batch` renderers documented
-> below are all implemented and covered by `tests/`. The thin script that assembles them into one
-> runnable `adsbtui` command (`src/adsbtui/__main__.py`) has **not landed yet** in this snapshot —
-> the console script `pip install` creates will currently fail with `ModuleNotFoundError` when
-> run. See [Known limitations](#known-limitations) for the full, honest list of what is and isn't
-> wired up yet.
+> tested package (see `AUDIT.md`/`CHANGELOG.md` for why). It runs: `adsbtui` launches the TUI and
+> the `--check`/`--once`/`--watch`/`--batch`/`--headless` modes all work. Some completed modules
+> are not yet reachable from the running app — see [Known limitations](#known-limitations) for the
+> honest list.
 
 ---
 
@@ -372,11 +369,9 @@ quiet_hours = "22:00-07:00"
 
 Being direct about the state of this snapshot:
 
-- **No top-level entry point yet.** `src/adsbtui/__main__.py` does not exist. `pip install`
-  creates the `adsbtui` console script declared in `pyproject.toml`, but running it fails
-  immediately with `ModuleNotFoundError` until that wiring lands. Everything else in this document
-  describes the config/CLI/data-pipeline surface that script is meant to assemble — it is
-  implemented and exercised by `tests/`, just not glued into one runnable command yet.
+- **The table does not scroll.** Aircraft beyond the visible rows are tracked, counted, and
+  present in every non-interactive output format, but there is no cursor or scrolling in the
+  curses table yet, so a very busy sky shows only the closest screenful.
 - **Most of the interactive UI is quit/pause/radius-only.** The help overlay, aircraft detail
   pane, and sort/filter/column-chooser/watchlist-editor screens exist as complete, unit-tested
   components but aren't bound to any key in `ui/app.py`'s event loop yet.
