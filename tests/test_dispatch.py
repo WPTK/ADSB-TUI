@@ -78,16 +78,11 @@ def make_dispatcher(cfg, clock, trackers) -> Dispatcher:
 class TestBuildEvent:
     def test_no_event_when_level_unchanged(self):
         ac = make_aircraft()
-        assert (
-            build_event(ac, AlertLevel.OVERHEAD, AlertLevel.OVERHEAD, DEFAULT_EVENTS)
-            is None
-        )
+        assert build_event(ac, AlertLevel.OVERHEAD, AlertLevel.OVERHEAD, DEFAULT_EVENTS) is None
 
     def test_no_event_when_new_level_is_none(self):
         ac = make_aircraft()
-        assert (
-            build_event(ac, AlertLevel.NONE, AlertLevel.OVERHEAD, DEFAULT_EVENTS) is None
-        )
+        assert build_event(ac, AlertLevel.NONE, AlertLevel.OVERHEAD, DEFAULT_EVENTS) is None
 
     def test_overhead_transition_maps_to_proximity(self):
         ac = make_aircraft()

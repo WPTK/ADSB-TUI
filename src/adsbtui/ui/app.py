@@ -364,9 +364,7 @@ class App:
         for ac in graded:
             seen.add(ac.hex)
             previous = self._prev_levels.get(ac.hex, AlertLevel.NONE)
-            event = dispatch.build_event(
-                ac, ac.alert_level, previous, self.cfg.alerts.events
-            )
+            event = dispatch.build_event(ac, ac.alert_level, previous, self.cfg.alerts.events)
             if event is None and ac.is_watched and previous == AlertLevel.NONE:
                 # A watchlist hit is not an AlertLevel transition, so it goes through the
                 # same gate under its own event name.
@@ -569,7 +567,7 @@ class App:
         stdscr.erase()
 
         if width < MIN_WIDTH or height < MIN_HEIGHT:
-            msg = "Terminal too small"[:max(0, width)]
+            msg = "Terminal too small"[: max(0, width)]
             y = max(0, height // 2)
             x = max(0, (width - len(msg)) // 2)
             self._safe_addstr(stdscr, y, x, msg, self._attrs.get("emergency", curses.A_BOLD))

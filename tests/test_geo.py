@@ -157,24 +157,36 @@ class TestClosestPointOfApproach:
 
     def test_missing_ground_speed_returns_none(self):
         d_cpa, t_cpa = closest_point_of_approach(
-            self.HOME_LAT, self.HOME_LON, self.HOME_LAT + 0.1, self.HOME_LON,
-            track_deg=180.0, ground_speed_kt=None,
+            self.HOME_LAT,
+            self.HOME_LON,
+            self.HOME_LAT + 0.1,
+            self.HOME_LON,
+            track_deg=180.0,
+            ground_speed_kt=None,
         )
         assert d_cpa is None
         assert t_cpa is None
 
     def test_missing_track_returns_none(self):
         d_cpa, t_cpa = closest_point_of_approach(
-            self.HOME_LAT, self.HOME_LON, self.HOME_LAT + 0.1, self.HOME_LON,
-            track_deg=None, ground_speed_kt=120.0,
+            self.HOME_LAT,
+            self.HOME_LON,
+            self.HOME_LAT + 0.1,
+            self.HOME_LON,
+            track_deg=None,
+            ground_speed_kt=120.0,
         )
         assert d_cpa is None
         assert t_cpa is None
 
     def test_stationary_aircraft_returns_none(self):
         d_cpa, t_cpa = closest_point_of_approach(
-            self.HOME_LAT, self.HOME_LON, self.HOME_LAT + 0.1, self.HOME_LON,
-            track_deg=180.0, ground_speed_kt=0.0,
+            self.HOME_LAT,
+            self.HOME_LON,
+            self.HOME_LAT + 0.1,
+            self.HOME_LON,
+            track_deg=180.0,
+            ground_speed_kt=0.0,
         )
         assert d_cpa is None
         assert t_cpa is None

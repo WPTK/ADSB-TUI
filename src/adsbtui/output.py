@@ -143,9 +143,7 @@ def render_table(aircraft_list: list[Aircraft], unit_system: str) -> str:
             "owner": ac.owner_name or ac.owner_operator or "N/A",
             "alert": ac.alert_level.value,
         }
-        lines.append(
-            "  ".join(_table_cell(values[key], width) for key, _, width in _TABLE_COLUMNS)
-        )
+        lines.append("  ".join(_table_cell(values[key], width) for key, _, width in _TABLE_COLUMNS))
     return "\n".join(lines)
 
 

@@ -445,7 +445,10 @@ def test_altitude_and_speed_cells_fit_their_minimum_widths():
 
 def test_ground_traffic_gets_no_closest_approach():
     ac = Aircraft(
-        hex="abc123", is_icao=True, on_ground=True,
-        cpa_distance_mi=3.1, cpa_seconds=3400.0,
+        hex="abc123",
+        is_icao=True,
+        on_ground=True,
+        cpa_distance_mi=3.1,
+        cpa_seconds=3400.0,
     )
     assert _cell_for("cpa", ac).strip() == ""

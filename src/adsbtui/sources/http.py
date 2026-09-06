@@ -55,8 +55,7 @@ class HttpSource:
 
         if not isinstance(data, dict) or not isinstance(data.get("aircraft"), list):
             raise SourceInvalidData(
-                f"response from {self.url} was not an aircraft.json object with an "
-                f"'aircraft' list"
+                f"response from {self.url} was not an aircraft.json object with an 'aircraft' list"
             )
 
         return data

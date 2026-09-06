@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        # The package itself has no runtime dependencies; the dev extra brings pytest and
+        # ruff, and the windows extra brings windows-curses (curses is not in the stdlib
+        # on Windows).
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Install curses support (Windows only)
+        if: runner.os == 'Windows'
+        run: python -m pip install -e ".[windows]"
+
+      - name: Lint
+        run: python -m ruff check src tests
+
+      - name: Format check
+        run: python -m ruff format --check src tests
+
+      - name: Test
+        # The pty-based TUI smoke tests skip themselves on Windows; everything else runs
+        # everywhere.
+        run: python -m pytest -q
+
+  smoke:
+    # A separate job so a failure here is obviously "the app does not start" rather than
+    # "a unit test broke".
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e .
+
+      - name: Health check against the test fixture
+        run: adsbtui --check --url tests/fixtures/aircraft.json --lat 37.7749 --lon -122.4194
+
+      - name: One-shot render in every output format
+        run: |
+          for fmt in table json csv; do
+            echo "--- $fmt ---"
+            adsbtui --once --format "$fmt" \
+              --url tests/fixtures/aircraft.json --lat 37.7749 --lon -122.4194
+          done
+
+      - name: Ground speed is converted from knots, not kilometres
+        # Guards the headline bug from the original tool: a 460-knot aircraft in the
+        # fixture must render as ~529 mph, not the ~286 the old km-to-miles factor gave.
+        run: |
+          adsbtui --once --format json \
+            --url tests/fixtures/aircraft.json --lat 37.7749 --lon -122.4194 \
+            | python -c "
+          import json, sys
+          rows = json.load(sys.stdin)
+          hit = [r for r in rows if r['hex'].lower() == 'a1b2c3']
+          assert hit, 'fixture aircraft a1b2c3 missing from output'
+          speed = hit[0]['ground_speed_kt']
+          assert abs(speed - 460.0) < 0.01, f'expected 460 kt, got {speed}'
+          shown = hit[0]['ground_speed']
+          assert '529' in shown, f'expected ~529 mph, got {shown!r}'
+          print('ok:', shown)
+          "

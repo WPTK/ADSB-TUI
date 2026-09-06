@@ -118,7 +118,7 @@ class WatchlistScreen:
 
     @property
     def mode(self) -> str:
-        """"list" while browsing the entry list, "add_form" while adding a new one."""
+        """ "list" while browsing the entry list, "add_form" while adding a new one."""
         return self._mode
 
     def _rebuild_list(self, cursor: int) -> None:

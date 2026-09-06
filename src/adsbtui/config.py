@@ -466,9 +466,7 @@ def build_argparser() -> argparse.ArgumentParser:
 
     # Parsed here for a stable, single CLI surface; interpreted by other modules.
     parser.add_argument("--once", action="store_true", default=False, help="fetch once and exit")
-    parser.add_argument(
-        "--watch", type=int, default=None, help="run N poll cycles then exit"
-    )
+    parser.add_argument("--watch", type=int, default=None, help="run N poll cycles then exit")
     parser.add_argument(
         "--headless", action="store_true", default=False, help="run without the curses UI"
     )

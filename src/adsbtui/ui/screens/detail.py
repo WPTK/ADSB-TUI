@@ -167,4 +167,3 @@ class DetailScreen:
         label_width = max(len(label) for label, _ in fields)
         lines = [_clip(f"{label.ljust(label_width)} : {value}", width) for label, value in fields]
         return lines[:height]
-
