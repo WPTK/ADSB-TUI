@@ -230,7 +230,15 @@ class TestDumpConfigFile:
         assert [p.name for p in tmp_path.iterdir()] == ["config.toml"]
 
     def test_expands_a_leading_tilde(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        # os.path.expanduser reads a different variable per platform: HOME on POSIX,
+        # USERPROFILE on Windows (falling back to HOMEDRIVE + HOMEPATH). Setting only HOME
+        # leaves the expansion pointing at the real user profile on Windows, which both
+        # fails the assertion and writes a config file into the developer's home.
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        monkeypatch.setenv("HOMEDRIVE", tmp_path.drive or "")
+        monkeypatch.setenv("HOMEPATH", str(tmp_path)[len(tmp_path.drive) :])
+
         dump_config(Config(), "~/adsbtui/config.toml")
         assert (tmp_path / "adsbtui" / "config.toml").is_file()
 
