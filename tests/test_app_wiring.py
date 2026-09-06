@@ -15,7 +15,7 @@ import pytest
 
 from adsbtui.config import Config
 from adsbtui.model import Aircraft, AlertLevel
-from adsbtui.ui.app import App
+from adsbtui.ui.app import SORT_KEYS, App, sort_aircraft
 
 
 class _StubSource:
@@ -291,6 +291,100 @@ def test_unknown_screen_name_is_ignored():
     app = _app()
     app._open_screen("does-not-exist", [])
     assert app._screen is None
+
+
+# ----------------------------------------------------------------------------------
+# Sorting
+# ----------------------------------------------------------------------------------
+
+#: One (lower, higher) pair of Aircraft kwargs per SORT_KEYS entry. "aaaaaa" always gets
+#: the lower-kwargs half and "zzzzzz" the higher-kwargs half, so a correct ascending sort
+#: always produces ["aaaaaa", "zzzzzz"] regardless of which field is under test -- "hex"
+#: needs no override at all, since aaaaaa < zzzzzz is already the fact being sorted on.
+_SORT_FIELD_CASES: dict[str, tuple[dict, dict]] = {
+    "distance": (dict(distance_mi=1.0), dict(distance_mi=9.0)),
+    "altitude": (dict(altitude_ft=1000.0), dict(altitude_ft=9000.0)),
+    "callsign": (dict(flight="AAL1"), dict(flight="UAL1")),
+    "reg": (dict(registration="N1"), dict(registration="N9")),
+    "type": (dict(type_code="A320"), dict(type_code="B738")),
+    "gs": (dict(ground_speed_kt=100.0), dict(ground_speed_kt=400.0)),
+    "vs": (dict(baro_rate_fpm=-500.0), dict(baro_rate_fpm=500.0)),
+    "brg": (dict(bearing_deg=10.0), dict(bearing_deg=200.0)),
+    "cpa": (dict(cpa_seconds=30.0), dict(cpa_seconds=300.0)),
+    "owner": (dict(owner_name="AAA Co"), dict(owner_name="ZZZ Co")),
+    "flags": (dict(db_flags=0x1), dict(db_flags=0x1 | 0x4)),  # "MIL" < "MIL PIA"
+    "age": (dict(seen_pos_s=1.0), dict(seen_pos_s=100.0)),
+    "alert": (dict(alert_level=AlertLevel.OUTBOUND), dict(alert_level=AlertLevel.EMERGENCY)),
+    "hex": ({}, {}),
+}
+
+
+def test_sort_field_cases_cover_every_sort_key():
+    """Guards the test data itself: every key SORT_KEYS offers must have a case above, and
+    vice versa, or this file's coverage of "every field is sortable" silently rots."""
+    assert set(_SORT_FIELD_CASES) == {key for key, _label in SORT_KEYS}
+
+
+@pytest.mark.parametrize("sort_key", sorted(_SORT_FIELD_CASES))
+def test_every_sort_key_orders_ascending_and_descending(sort_key):
+    lower_kwargs, higher_kwargs = _SORT_FIELD_CASES[sort_key]
+    lower = _ac("aaaaaa", **lower_kwargs)
+    higher = _ac("zzzzzz", **higher_kwargs)
+
+    ascending = sort_aircraft([higher, lower], sort_key, reverse=False)
+    assert [ac.hex for ac in ascending] == ["aaaaaa", "zzzzzz"]
+
+    descending = sort_aircraft([higher, lower], sort_key, reverse=True)
+    assert [ac.hex for ac in descending] == ["zzzzzz", "aaaaaa"]
+
+
+@pytest.mark.parametrize("sort_key", ["distance", "reg", "owner", "flags", "cpa"])
+def test_aircraft_with_no_sort_value_always_sorts_last(sort_key):
+    with_value_kwargs, _ = _SORT_FIELD_CASES[sort_key]
+    with_value = _ac("has", **with_value_kwargs)
+    without_value = _ac(
+        "none",
+        distance_mi=None,
+        registration=None,
+        owner_name=None,
+        owner_operator=None,
+        db_flags=0,
+        cpa_seconds=None,
+    )
+
+    for reverse in (False, True):
+        ordered = sort_aircraft([without_value, with_value], sort_key, reverse=reverse)
+        assert [ac.hex for ac in ordered] == ["has", "none"], (sort_key, reverse)
+
+
+def test_alert_level_none_sorts_by_rank_not_shoved_to_the_end():
+    """Unlike reg/owner/flags/cpa, alert_level is never missing -- it defaults to NONE,
+    which is a real, ranked value (rank 0, the lowest) and must sort accordingly rather
+    than being treated as "no value" the way the fields above are."""
+    none_level = _ac("none-level", alert_level=AlertLevel.NONE)
+    emergency = _ac("emergency", alert_level=AlertLevel.EMERGENCY)
+
+    ascending = sort_aircraft([emergency, none_level], "alert", reverse=False)
+    assert [ac.hex for ac in ascending] == ["none-level", "emergency"]
+
+    descending = sort_aircraft([emergency, none_level], "alert", reverse=True)
+    assert [ac.hex for ac in descending] == ["emergency", "none-level"]
+
+
+def test_cpa_sort_hides_ground_aircraft_like_the_column_does():
+    airborne = _ac("air", cpa_seconds=120.0, on_ground=False)
+    # A shorter cpa_seconds would otherwise sort first -- but a taxiing aircraft's
+    # extrapolated closest approach is exactly what the "cpa" column itself hides.
+    taxiing = _ac("taxi", cpa_seconds=10.0, on_ground=True)
+    ordered = sort_aircraft([taxiing, airborne], "cpa", reverse=False)
+    assert [ac.hex for ac in ordered] == ["air", "taxi"]
+
+
+def test_sort_keys_keeps_distance_then_altitude_first():
+    """test_opening_and_closing_the_sort_screen_applies_its_result (above) presses the
+    key picker's "next" key exactly once from the default ("distance") and expects to
+    land on "altitude" -- this only holds if the two stay adjacent in that order."""
+    assert [key for key, _label in SORT_KEYS[:2]] == ["distance", "altitude"]
 
 
 # ----------------------------------------------------------------------------------
