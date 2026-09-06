@@ -27,6 +27,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **The remaining filters apply**: `hide_ground`, `include_nonicao`, and the altitude band now
   affect what you see, alongside a live text search across callsign, hex, registration, owner,
   and type.
+- **Owner and type lookup now chains multiple sources**: readsb's own feed enrichment (`r`/`t`/
+  `desc`/`ownOp`/`dbFlags`) wins first, then a locally-built SQLite registry, then a legacy
+  hand-supplied CSV, then a US N-number and country derived from the hex code alone -- each
+  stage only filling in what the previous one left blank.
+- **A Data screen** (`F8`/`D`) downloads and rebuilds the local registry from the FAA bulk
+  registry and/or tar1090-db on a background thread, with a progress bar and each source's
+  on-disk state, row count, age, and license shown before you download anything (F30, F31).
+- **A Settings screen** (`F2`/`,`) covers every config section: current value, default, and a
+  one-line explanation per field, inline validation, and a Save that writes `config.toml` and
+  applies the change to the running session immediately (F09, F16).
+- **`--headless` is a real background service**, not just a fetch-and-log loop: it now runs the
+  same tracking, watchlist matching, filtering, alert-grading, alert-dispatch, and history
+  pipeline the curses UI does, so a systemd unit actually delivers the bell/desktop/webhook/
+  command notifications it advertises instead of only logging one line per cycle.
 - `src/adsbtui/__main__.py`: the console entry point. `adsbtui` launches the curses TUI;
   `--check`, `--once`, `--watch N`, `--batch`, and `--headless` select the non-interactive
   modes. Exit codes: 0 clean, 2 configuration/terminal error, 4 source unreachable.
@@ -57,6 +71,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   delimiter, and `chmod`/`chown` steps that do nothing.
 
 ### Fixed
+- `--once`/`--watch`/`--batch` previously ignored `registry.path` and every `[filter]` setting
+  beyond radius, and never computed elevation angle -- so OWNER was always N/A outside the TUI
+  and JSON/CSV output disagreed with what the curses screen showed for the same feed.
+- The derived US N-number (used as a last-resort fallback when no registry has a match) was
+  wrong for most aircraft; corrected against the FAA's actual suffix allocation scheme.
 - One malformed aircraft record no longer discards the whole fetch and blanks the table (F08).
 - The UI no longer blocks on the network: fetching runs on a background thread, so the quit key
   and resize stay responsive during a slow or dead feed (F03).

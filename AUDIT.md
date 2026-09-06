@@ -29,7 +29,7 @@ milestones land: `Open`, `Fixed (M#)`, or `Won't fix: reason`.
 | F13 | README 64, 75 | README references `adsb_tracker.py`; the file is `adsbtui.py` | D | B33 | Fixed (M10) |
 | F14 | README 51-62 | Wrong FAA link, wrong delimiter, bundled `MASTER.csv` never mentioned | D | B22, B33 | Fixed (M10) |
 | F15 | README 80-121 | `chmod`/`chown` on `/run/readsb/aircraft.json` is a no-op | R | B21, B33 | Fixed (M10) |
-| F16 | 16, README 69 | Documented URL path only works with a non-default web server alias | M | B21 | Partly fixed (M1): a bare path or file:// URL now works, so no web server is needed on the receiver. URL auto-probing is still deferred. |
+| F16 | 16, README 69 | Documented URL path only works with a non-default web server alias | M | B21 | Fixed (M1, M5): a bare path or file:// URL now works, so no web server is needed on the receiver; the first-run setup wizard also probes the common HTTP paths and local files for you and lets you pick from what actually answered. |
 
 ## Medium
 
@@ -49,7 +49,7 @@ milestones land: `Open`, `Fixed (M#)`, or `Won't fix: reason`.
 | F28 | 56-92 | `fetch_aircraft_data` mixes I/O, parsing, enrichment, formatting; untestable; no tests/packaging | R | B09 | Fixed (M1) |
 | F29 | 31 | NAME kept with 50-char padding; whitespace-only names render blank; long names truncated | D | B03, B06 | Fixed (M1) |
 | F30 | repo | 20.7 MB `MASTER.csv` committed, undated, 3-column subset | D | B22 | Fixed (M0) |
-| F31 | README 163-165 | "Non-US"/"type needs paid API"/"military-LADD-PIA" limitations are solvable for free | D (docs) | B22-B25 | Partly fixed (M2): the receiver's own enrichment fields are now read, covering non-US aircraft and type when the feed provides them. An automatic registry download is still deferred. |
+| F31 | README 163-165 | "Non-US"/"type needs paid API"/"military-LADD-PIA" limitations are solvable for free | D (docs) | B22-B25 | Fixed (M2, M8): the receiver's own enrichment fields are read first; the in-app Data screen (`F8`) also downloads and builds a local SQLite registry from the FAA bulk registry and tar1090-db on request, covering non-US aircraft and type without a paid API. |
 | F32 | README 155 | Claims unique-aircraft logging; nothing but errors is logged | R | B29, B33 | Fixed (M9): each closed track is now summarised into a SQLite sightings table, and the README describes what is actually recorded. |
 | F33 | 157-162 | Untrusted JSON strings reach `addstr` unfiltered: NUL raises uncaught `ValueError` | R | B06 | Fixed (M1) |
 | F34 | 58 | No response size cap or wall-clock bound on the fetch | R | B03, B04 | Fixed (M1) |

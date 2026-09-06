@@ -478,7 +478,10 @@ def build_argparser() -> argparse.ArgumentParser:
         "--headless", action="store_true", default=False, help="run without the curses UI"
     )
     parser.add_argument(
-        "--batch", action="store_true", default=False, help="alias for --headless --once"
+        "--batch",
+        action="store_true",
+        default=False,
+        help="stream SEEN/NEW/LOST/ALERT lines as aircraft appear, disappear, or change alert",
     )
     parser.add_argument(
         "--format",
