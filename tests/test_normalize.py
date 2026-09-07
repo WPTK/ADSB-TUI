@@ -2,19 +2,11 @@
 
 from __future__ import annotations
 
-import os
-
-import pytest
-
 from adsbtui.normalize import (
-    load_owner_registry,
     parse_aircraft,
     parse_snapshot,
     sanitize,
 )
-
-FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
-
 
 # --------------------------------------------------------------------------- sanitize()
 
@@ -274,26 +266,3 @@ def test_parse_aircraft_emergency_variants():
     assert parse_aircraft({"hex": "a2", "emergency": ""}).emergency is None
     assert parse_aircraft({"hex": "a3"}).emergency is None
     assert parse_aircraft({"hex": "a4", "emergency": "general"}).emergency == "general"
-
-
-# --------------------------------------------------------------------------- load_owner_registry()
-
-
-def test_load_owner_registry_resolves_known_hex():
-    path = os.path.join(FIXTURES_DIR, "sample_master.csv")
-    registry = load_owner_registry(path)
-    assert registry["A004B3"] == "BENE MARY D"
-
-
-def test_load_owner_registry_strips_trailing_padding_from_names_and_hex():
-    path = os.path.join(FIXTURES_DIR, "sample_master.csv")
-    registry = load_owner_registry(path)
-    for hex_code, name in registry.items():
-        assert hex_code == hex_code.strip().upper()
-        assert name == name.strip()
-        assert not name.endswith(" ")
-
-
-def test_load_owner_registry_missing_file_raises():
-    with pytest.raises(OSError):
-        load_owner_registry(os.path.join(FIXTURES_DIR, "does_not_exist.csv"))

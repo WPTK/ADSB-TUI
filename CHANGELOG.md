@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **A radar scope.** Aircraft are plotted around you with range rings, N/E/S/W ticks and a
+  direction arrow per contact, so the shape of the traffic is visible instead of implied by a
+  column of numbers. Appears automatically at 110 columns and wider; `r` toggles it, and it
+  degrades to ASCII where the border style asks for it.
+- **Rows are colored by altitude band** when nothing more urgent applies: warm low, cool high.
+  An ordinary screenful now carries information rather than being one flat color.
+- **A bare receiver address works as a source.** `--url 192.168.3.80` (or a hostname, or
+  `host:8080`) probes the paths receiver images actually publish aircraft.json at and keeps
+  whichever answers. It previously fell through to the file loader and failed with "file not
+  found: 192.168.3.80", having never touched the network at all.
+- **The registry downloads itself** in the background when it is missing or older than
+  `registry.max_age_days` (now 1 day, was 30). Owner and type data no longer wait for anyone to
+  find a screen and press a key; the status line carries the progress.
+- **The help screen explains the columns**, not just the keys.
 - **The table sorts by any visible field**, not just distance, altitude, or callsign:
   registration, type, ground speed, vertical speed, bearing, closest-point-of-approach,
   owner, MIL/PIA/LADD/category flags, position age, alert level, and the raw hex code are
@@ -34,13 +48,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **The remaining filters apply**: `hide_ground`, `include_nonicao`, and the altitude band now
   affect what you see, alongside a live text search across callsign, hex, registration, owner,
   and type.
-- **Owner and type lookup now chains multiple sources**: readsb's own feed enrichment (`r`/`t`/
-  `desc`/`ownOp`/`dbFlags`) wins first, then a locally-built SQLite registry, then a legacy
-  hand-supplied CSV, then a US N-number and country derived from the hex code alone -- each
-  stage only filling in what the previous one left blank.
-- **A Data screen** (`F8`/`D`) downloads and rebuilds the local registry from the FAA bulk
-  registry and/or tar1090-db on a background thread, with a progress bar and each source's
-  on-disk state, row count, age, and license shown before you download anything (F30, F31).
+- **Owner and type lookup chains multiple sources**: readsb's own feed enrichment (`r`/`t`/
+  `desc`/`ownOp`/`dbFlags`) wins first, then the downloaded SQLite registry, then a US N-number
+  and country derived from the hex code alone -- each stage only filling in what the previous
+  one left blank.
+- **A Data screen** (`F8`/`D`) shows each registry source's on-disk state, row count, age and
+  license, and forces a rebuild on a background thread with a progress bar. Routine refreshes
+  now happen on their own; this screen is for seeing what you have (F30, F31).
 - **A Settings screen** (`F2`/`,`) covers every config section: current value, default, and a
   one-line explanation per field, inline validation, and a Save that writes `config.toml` and
   applies the change to the running session immediately (F09, F16).
@@ -55,11 +69,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and assert a clean exit on `q`, on `q` after pausing, and on Ctrl-C, at 120x30, 80x24, and
   40x10 (F04, F25, F26).
 - `AUDIT.md`: full audit findings table with status tracking (F01-F47).
-- `tests/fixtures/sample_master.csv`: 50-row FAA registry sample for tests and docs.
 - `contrib/adsb-tui-kiosk.service` and `contrib/tmux.md`.
 - `.gitignore` for bytecode caches, logs, local config, and the local registry copy.
 
 ### Changed
+- **The table header is in plain English.** `GS`/`VS`/`BRG`/`CPA` are now
+  `SPEED`/`CLIMB`/`DIRECTION`/`CLOSEST PASS`, with short forms kept only for terminals too
+  narrow for the real words.
+- **Columns are separated by whitespace, not box-drawing pipes.** A grid of pipes reads as a
+  cramped mess; every table tool people actually like separates with space.
+- **The screen furniture is rearranged.** The title bar is gone entirely: it spent a row on the
+  program name, its version, the current unit system and the config file path, none of which
+  change while you watch. The top row is now live state only (link health, counts, message rate,
+  clock), and the key hints moved to the bottom, out of the way of the table.
 - **Rewritten as a package.** The single 181-line script is now `src/adsbtui/` with no
   third-party dependencies at all (the old version required `pandas` and `requests`), a TOML
   config file with CLI-flag and environment-variable overrides, and 634 tests.
@@ -71,19 +93,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (or `--config`/`ADSBTUI_*`). Editing module constants no longer does anything (F09).
 - `adsbtui.py` at the repository root is now a thin compatibility shim that forwards to the
   package, so `python3 adsbtui.py ...` keeps working.
-- `MASTER.csv` removed from version control (F30); the registry is auto-downloaded and built by
-  the Data screen instead (see below), with `registry.path` kept only as an optional legacy
-  bring-your-own CSV for anyone who already has one.
+- `MASTER.csv` removed from version control (F30); the registry is downloaded and built
+  automatically instead.
 - README rewritten (F12-F15, F45): the old one documented a script name that never existed, a
   nonexistent `curses` PyPI package, a placeholder clone URL, the wrong FAA download URL and
   delimiter, and `chmod`/`chown` steps that do nothing.
 - **README rewritten again, end to end**: cut by nearly half, reformatted into scannable tables
   instead of prose paragraphs, and dropped a "Contributing" section that made no sense for a
-  single-maintainer project. Also fixed the CSV framing left over from the first rewrite --
-  `registry.path` (the bring-your-own CSV) had drifted to reading like the primary way to get
-  owner/type data, when the auto-downloaded database (Data screen, `F8`) has been the intended
-  main path since it shipped; the in-app Settings and config-file-comment text for that key
-  picked up the same correction.
+  single-maintainer project.
+
+### Removed
+- **The legacy FAA registry CSV, completely**: `registry.path`, the `--registry` flag, the CSV
+  enrichment provider, the loader, and the bundled sample fixture. The downloaded database and
+  the receiver's own feed cover everything it did, and keeping a second, manual, US-only path
+  around left the docs describing a workflow nobody should follow.
 
 ### Fixed
 - `--once`/`--watch`/`--batch` previously ignored `registry.path` and every `[filter]` setting

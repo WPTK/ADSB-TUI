@@ -39,9 +39,10 @@ from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from typing import Any, TextIO
 
-from adsbtui import alerts, dispatch, geo, history, normalize, tracker
+from adsbtui import alerts, dispatch, enrich, geo, history, normalize, tracker
 from adsbtui import watchlist as watchlist_mod
 from adsbtui.config import Config
+from adsbtui.enrich import registry_update
 from adsbtui.model import Aircraft, AlertLevel, Snapshot
 from adsbtui.sources import Source, SourceError
 from adsbtui.units import (
@@ -52,6 +53,10 @@ from adsbtui.units import (
 )
 
 _LOGGER_NAME = "adsbtui"
+
+#: How often the headless service re-checks whether the registry has gone stale. Far more
+#: frequent than the daily refresh it guards, and cheap enough to be invisible.
+REGISTRY_CHECK_INTERVAL_S = 3600.0
 
 # --------------------------------------------------------------------------------------
 # Formatters
@@ -204,6 +209,85 @@ def render(aircraft_list: list[Aircraft], unit_system: str, fmt: str) -> str:
 # --------------------------------------------------------------------------------------
 
 
+def registry_is_due(cfg: Config) -> bool:
+    """True when the registry database is missing or older than registry.max_age_days.
+
+    Shared by the TUI and the headless service so both answer "is a refresh due" the same
+    way. auto_update off means never due, whatever the age.
+    """
+    if not cfg.registry.auto_update:
+        return False
+    db_path = os.path.expanduser(cfg.registry.db or "")
+    if not db_path:
+        return False
+    if not os.path.exists(db_path):
+        return True
+    try:
+        meta = registry_update.read_meta(db_path)
+    except sqlite3.Error:
+        return True
+    if not meta:
+        return True
+    max_age_s = max(0.0, float(cfg.registry.max_age_days) * 86400.0)
+    return all(entry.age_s() >= max_age_s for entry in meta.values())
+
+
+def refresh_registry(cfg: Config, logger: logging.Logger | None = None) -> bool:
+    """Download and rebuild the registry. True if it now holds fresh data.
+
+    Synchronous on purpose: the only caller is the headless service, which has no display
+    to keep responsive, and starting up with owner data already resolved beats serving a
+    few minutes of "N/A" while a thread catches up. Every failure is logged and swallowed
+    -- a service must not refuse to run because a download failed.
+    """
+    log = logger if logger is not None else logging.getLogger(_LOGGER_NAME)
+    db_path = os.path.expanduser(cfg.registry.db)
+    try:
+        result = registry_update.build_from_tar1090(registry_update.TAR1090_URL, db_path)
+    except Exception as exc:
+        log.warning("registry update failed: %s", exc)
+        return False
+    if result.not_modified:
+        log.info("registry already current")
+    else:
+        log.info("registry updated: %d rows", result.row_count)
+    return True
+
+
+def build_enricher(cfg: Config, logger: logging.Logger | None = None) -> enrich.Enricher:
+    """Build the registration/type/owner lookup chain for a non-curses run.
+
+    Built once by the caller and reused for every tick: the SQLite handle and the
+    per-address cache are what keep enrichment off the per-poll critical path. A missing
+    database is not an error -- the feed's own fields and the derived N-number/country
+    still resolve, which is why this always returns a usable Enricher.
+    """
+    log = logger if logger is not None else logging.getLogger(_LOGGER_NAME)
+    db_path = os.path.expanduser(cfg.registry.db or "")
+    if db_path and not os.path.exists(db_path):
+        log.info("no registry database at %s; using feed and derived data only", db_path)
+        db_path = ""
+    try:
+        return enrich.Enricher.from_paths(db_path or None)
+    except sqlite3.Error as exc:
+        log.warning("registry database unusable (%s): %s", db_path, exc)
+        return enrich.Enricher.from_paths(None)
+
+
+def enrich_all(aircraft_list: list[Aircraft], enricher: enrich.Enricher) -> None:
+    """Fill in registration/type/owner/flags for each aircraft, in place.
+
+    A lookup failure is logged at debug and skipped rather than propagated: enrichment is
+    decoration, and losing an owner name must never cost the whole poll.
+    """
+    log = logging.getLogger(_LOGGER_NAME)
+    for ac in aircraft_list:
+        try:
+            enricher.apply(ac)
+        except Exception as exc:
+            log.debug("enrichment failed for %s: %s", ac.hex, exc)
+
+
 def _is_watched_emergency(cfg: Config, aircraft: Aircraft) -> bool:
     """Lightweight pre-check mirroring alerts.grade()'s first branch, used only to decide
     whether an aircraft should bypass the radius filter -- the authoritative alert_level
@@ -216,44 +300,13 @@ def _is_watched_emergency(cfg: Config, aircraft: Aircraft) -> bool:
     return aircraft.emergency is not None
 
 
-def load_registry(cfg: Config, logger: logging.Logger | None = None) -> dict[str, str]:
-    """Load the FAA owner registry named by cfg.registry.path, once.
-
-    Returns {} when no path is configured, or when the file cannot be read (logged as a
-    warning) -- an unreadable registry costs owner names, which is not a reason to refuse
-    to run. Callers load this ONCE and pass the result into the pipeline for every tick;
-    the CSV is far too big to re-read every few seconds.
-    """
-    if not cfg.registry.path:
-        return {}
-    path = os.path.expanduser(cfg.registry.path)
-    log = logger if logger is not None else logging.getLogger(_LOGGER_NAME)
-    try:
-        return normalize.load_owner_registry(path)
-    except OSError as exc:
-        log.warning("could not load registry %s: %s", path, exc)
-        return {}
-
-
-def parse_aircraft_list(
-    snapshot: Snapshot, registry: dict[str, str] | None = None
-) -> list[Aircraft]:
-    """Normalize a Snapshot's raw entries into Aircraft, dropping unparseable ones.
-
-    When `registry` is non-empty, an aircraft whose (uppercased) hex is in it gets its
-    owner_name filled in -- which is what makes 'owner:' watchlist patterns and the OWNER
-    column mean anything outside the TUI.
-    """
+def parse_aircraft_list(snapshot: Snapshot) -> list[Aircraft]:
+    """Normalize a Snapshot's raw entries into Aircraft, dropping unparseable ones."""
     aircraft_list: list[Aircraft] = []
     for raw_ac in snapshot.raw_aircraft:
         ac = normalize.parse_aircraft(raw_ac)
-        if ac is None:
-            continue
-        if registry:
-            name = registry.get(ac.hex.upper())
-            if name:
-                ac.owner_name = name
-        aircraft_list.append(ac)
+        if ac is not None:
+            aircraft_list.append(ac)
     return aircraft_list
 
 
@@ -333,7 +386,7 @@ def grade_all(aircraft_list: list[Aircraft], cfg: Config) -> None:
 def fetch_and_process(
     source: Source,
     cfg: Config,
-    registry: dict[str, str] | None = None,
+    enricher: enrich.Enricher | None = None,
 ) -> tuple[list[Aircraft], SourceError | None]:
     """One stateless fetch-and-process cycle: fetch, normalize, geo-derive, filter, grade.
 
@@ -353,7 +406,9 @@ def fetch_and_process(
         return [], exc
 
     snapshot = normalize.parse_snapshot(raw, time.time())
-    aircraft_list = parse_aircraft_list(snapshot, registry)
+    aircraft_list = parse_aircraft_list(snapshot)
+    if enricher is not None:
+        enrich_all(aircraft_list, enricher)
     derive_geo(aircraft_list, cfg)
     filtered = apply_filters(aircraft_list, cfg)
     grade_all(filtered, cfg)
@@ -411,9 +466,12 @@ class HeadlessRunner:
         self.source = source
         self._logger = logger if logger is not None else logging.getLogger(_LOGGER_NAME)
 
-        # Loaded once at startup, not per tick: both are files on disk that do not change
-        # while the service runs, and the registry CSV is large.
-        self._registry = load_registry(cfg, self._logger)
+        # A service that runs for weeks has to keep the registry current itself, and one
+        # starting on a fresh machine has no registry at all -- so the check happens here
+        # and then on the interval below, not only once at install time.
+        self._registry_checked_at = 0.0
+        self._refresh_registry_if_due()
+        self._enricher = build_enricher(cfg, self._logger)
         self._watch_entries: list[watchlist_mod.WatchEntry] = []
         if cfg.watchlist.path:
             self._watch_entries = watchlist_mod.load(os.path.expanduser(cfg.watchlist.path))
@@ -427,6 +485,21 @@ class HeadlessRunner:
         #: hex -> running per-track aggregates, written out when the track closes.
         self._track_stats: dict[str, dict[str, Any]] = {}
         self._history_db = self._open_history()
+
+    def _refresh_registry_if_due(self) -> bool:
+        """Rebuild the registry when due, rate-limiting the staleness check itself.
+
+        The check touches SQLite, so running it on every poll of a 5-second loop would be
+        thousands of pointless queries an hour; once an hour is far more often than a
+        daily refresh needs. Returns True when the database was actually rebuilt.
+        """
+        now = time.time()
+        if now - self._registry_checked_at < REGISTRY_CHECK_INTERVAL_S:
+            return False
+        self._registry_checked_at = now
+        if not registry_is_due(self.cfg):
+            return False
+        return refresh_registry(self.cfg, self._logger)
 
     def _open_history(self) -> str:
         """Prepare the sightings database, returning its path or "" if unavailable.
@@ -463,9 +536,13 @@ class HeadlessRunner:
         except SourceError as exc:
             return TickResult(aircraft=[], events=[], closed_tracks=0, error=exc)
 
+        if self._refresh_registry_if_due():
+            self._enricher = build_enricher(self.cfg, self._logger)
+
         fetched_at = time.time()
         snapshot = normalize.parse_snapshot(raw, fetched_at)
-        aircraft_list = parse_aircraft_list(snapshot, self._registry)
+        aircraft_list = parse_aircraft_list(snapshot)
+        enrich_all(aircraft_list, self._enricher)
         derive_geo(aircraft_list, self.cfg)
 
         if self._watch_entries:
@@ -666,7 +743,7 @@ def run_once(cfg: Config, source: Source, fmt: str, out: TextIO = sys.stdout) ->
     Returns 0 on success. On a fetch/data error, prints "ERROR: <message>" to sys.stderr
     and returns 4 instead of printing anything to `out`.
     """
-    aircraft_list, err = fetch_and_process(source, cfg, registry=load_registry(cfg))
+    aircraft_list, err = fetch_and_process(source, cfg, enricher=build_enricher(cfg))
     if err is not None:
         print(f"ERROR: {err}", file=sys.stderr)
         return 4
@@ -693,7 +770,7 @@ def run_watch(
     Returns 0 if at least one iteration succeeded, 4 if every iteration errored (each
     error is still printed as "ERROR: <message>" to sys.stderr as it happens).
     """
-    registry = load_registry(cfg)
+    enricher = build_enricher(cfg)
     any_success = False
     i = 0
     while iterations is None or i < iterations:
@@ -701,7 +778,7 @@ def run_watch(
             stamp = time.strftime("%Y-%m-%d %H:%M:%S")
             print(f"--- {stamp} ---", file=out)
 
-        aircraft_list, err = fetch_and_process(source, cfg, registry=registry)
+        aircraft_list, err = fetch_and_process(source, cfg, enricher=enricher)
         if err is not None:
             print(f"ERROR: {err}", file=sys.stderr)
         else:
@@ -772,12 +849,12 @@ def run_batch(
     Stops after `iterations` loops if given; None means loop forever.
     """
     unit = UNIT_SYSTEMS[cfg.display.units]["distance"]
-    registry = load_registry(cfg)
+    enricher = build_enricher(cfg)
     previous_hexes: set[str] | None = None
     previous_levels: dict[str, AlertLevel] = {}
     i = 0
     while iterations is None or i < iterations:
-        aircraft_list, err = fetch_and_process(source, cfg, registry=registry)
+        aircraft_list, err = fetch_and_process(source, cfg, enricher=enricher)
         if err is not None:
             yield f"ERROR {err}"
         else:

@@ -86,7 +86,7 @@ class Aircraft:
     is_stale: bool = False
     is_lost: bool = False
 
-    # local registry lookup (FAA CSV owner name; see normalize.py's registry loader)
+    # owner name resolved by the enrichment layer (see enrich/providers.py)
     owner_name: str | None = None
 
     # set by the watchlist matcher when this aircraft matches a user pattern

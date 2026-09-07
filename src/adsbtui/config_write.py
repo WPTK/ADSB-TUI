@@ -50,7 +50,7 @@ _SECTION_COMMENTS: dict[str, str] = {
     "display": "Table layout, units, colors, and sort order.",
     "alerts": "What counts as an alert, and how alerts are delivered.",
     "watchlist": "The watchlist file and how matches are treated.",
-    "registry": "Aircraft registration/type lookup: an auto-downloaded database, or a CSV.",
+    "registry": "The aircraft registration/type database, downloaded automatically.",
     "history": "Optional SQLite database of closed tracks.",
     "logging": "Log file location, level, and rotation.",
 }

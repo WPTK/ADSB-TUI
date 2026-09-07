@@ -89,6 +89,13 @@ def glyphs(style: str) -> dict[str, str]:
         raise ValueError(f"unknown border style {style!r}") from None
 
 
+#: Every color name a RowStyle may use. The curses layer maps exactly these; a style
+#: naming anything else would silently render in the terminal's default foreground.
+COLOR_NAMES: frozenset[str] = frozenset(
+    {"default", "cyan", "yellow", "red", "magenta", "green", "blue", "white"}
+)
+
+
 @dataclass(frozen=True)
 class RowStyle:
     """A semantic display style: a color name plus a small set of attribute flags.
@@ -114,10 +121,51 @@ ROW_STYLES: dict[str, RowStyle] = {
     "overhead": RowStyle(fg="yellow", bold=True),
     "inbound": RowStyle(fg="yellow"),
     "emergency": RowStyle(fg="red", bold=True, reverse=True),
-    "military": RowStyle(fg="magenta"),
-    "watchlist": RowStyle(fg="yellow", bold=True),
+    "military": RowStyle(fg="magenta", bold=True),
+    "watchlist": RowStyle(fg="green", bold=True),
     "stale": RowStyle(fg="default", dim=True),
     "new": RowStyle(fg="cyan", bold=True),
     "climb": RowStyle(fg="green"),
     "descend": RowStyle(fg="yellow"),
+    # Scope furniture: the rings are context, not content, so they are dim enough to read
+    # around. The aircraft glyphs reuse the alert/altitude styles above.
+    "ring": RowStyle(fg="blue", dim=True),
+    "chrome": RowStyle(fg="cyan"),
+    "ok": RowStyle(fg="green", bold=True),
+    "warn": RowStyle(fg="yellow", bold=True),
+    "bad": RowStyle(fg="red", bold=True),
+    # Altitude bands. An aircraft that is not alerting is colored by how high it is, which
+    # is the one property you can otherwise only get by reading a number in every row:
+    # warm low, cool high, so circuit traffic and airliners separate at a glance.
+    "alt_ground": RowStyle(fg="default", dim=True),
+    "alt_low": RowStyle(fg="red"),
+    "alt_mid": RowStyle(fg="yellow"),
+    "alt_high": RowStyle(fg="green"),
+    "alt_vhigh": RowStyle(fg="cyan"),
 }
+
+#: Upper bound (feet, barometric) -> altitude-band style name, lowest first. The cuts are
+#: the ones that separate traffic you would actually distinguish by eye: circuit and
+#: helicopter work, GA cruise, turboprop/regional, and jets in the flight levels.
+ALTITUDE_BANDS: tuple[tuple[float, str], ...] = (
+    (2_000.0, "alt_low"),
+    (10_000.0, "alt_mid"),
+    (25_000.0, "alt_high"),
+    (float("inf"), "alt_vhigh"),
+)
+
+
+def altitude_style(altitude_ft: float | None, on_ground: bool = False) -> str:
+    """The band style name for an altitude, "normal" when the altitude is unknown.
+
+    An unknown altitude deliberately does NOT get a band color: coloring it would claim a
+    height the feed never reported, and "no data" must not look like "on the deck".
+    """
+    if on_ground:
+        return "alt_ground"
+    if altitude_ft is None:
+        return "normal"
+    for ceiling, name in ALTITUDE_BANDS:
+        if altitude_ft < ceiling:
+            return name
+    return "alt_vhigh"

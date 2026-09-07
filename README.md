@@ -1,9 +1,10 @@
 # ADSB-TUI
 
-A terminal UI for tracking nearby aircraft from a `readsb`/`dump1090-fa` ADS-B feed. Polls your
-receiver in the background, shows distance/bearing/closest-approach from your location, colors
-rows by how alarmed you should be, and can alert you (bell, desktop notification, webhook, shell
-command) when something's worth noticing. Zero third-party dependencies. Python 3.11+.
+A terminal UI for tracking nearby aircraft from a `readsb`/`dump1090-fa` ADS-B feed. Live radar
+scope plus a sortable table: distance, bearing and closest-approach from your location, rows
+colored by altitude and by how alarmed you should be, and alerts (bell, desktop notification,
+webhook, shell command) when something's worth noticing. Zero third-party dependencies.
+Python 3.11+.
 
 ---
 
@@ -29,7 +30,7 @@ To skip the wizard, write the config yourself:
 
 ```toml
 [source]
-url = "http://192.168.1.50/skyaware/data/aircraft.json"
+url = "192.168.3.80"
 
 [home]
 lat = 37.7749
@@ -39,34 +40,40 @@ lon = -122.4194
 Or drive it from flags with no config file at all:
 
 ```bash
-adsbtui --url http://192.168.1.50/skyaware/data/aircraft.json --lat 37.7749 --lon -122.4194
+adsbtui --url 192.168.3.80 --lat 37.7749 --lon -122.4194
 ```
 
 ### Pointing at your receiver
 
-The wizard probes these automatically. Pick whichever answers:
+**Just give it the address.** A bare IP or hostname is enough: `adsbtui` tries the paths that
+receiver images actually publish `aircraft.json` at and keeps the one that answers.
 
-| URL | Image |
+| What you can pass | Meaning |
 |---|---|
-| `http://<ip>/tar1090/data/aircraft.json` | tar1090 |
-| `http://<ip>/skyaware/data/aircraft.json` | FlightAware SkyAware / dump1090-fa |
-| `http://<ip>/dump1090-fa/data/aircraft.json` | dump1090-fa |
-| `http://<ip>:8080/data/aircraft.json` | readsb / dump1090 built-in server |
-| `/run/readsb/aircraft.json` | local file, when `adsbtui` runs on the receiver itself |
+| `192.168.3.80`, `adsb.local`, `192.168.3.80:8080` | Probe this receiver for aircraft.json |
+| `http://<ip>/tar1090/data/aircraft.json` | An exact URL, used as-is |
+| `/run/readsb/aircraft.json` | A local file, when `adsbtui` runs on the receiver itself |
+
+The paths probed, in order, on port 80 and then 8080: `/tar1090/data/`, `/skyaware/data/`,
+`/dump1090-fa/data/`, `/data/`. If none answer, the error lists every URL it tried.
 
 ---
 
 ## Features
 
+- **Radar scope.** Aircraft plotted around you with range rings, compass ticks and an arrow per
+  contact showing where it is heading. Appears automatically on terminals 110 columns and wider;
+  `r` toggles it.
+- **Altitude-colored rows.** Warm low, cool high, so circuit traffic and airliners separate at a
+  glance without reading a single number.
 - A background thread fetches data, so the UI never blocks on the network.
 - Correct units (the original tool understated speed by ~46%).
 - Resize-safe table; drops low-priority columns as the terminal narrows.
-- Sort by any of the 14 columns (`s`). The original build only offered three: distance,
-  altitude, callsign.
+- Sort by any of the 14 columns (`s`).
 - Alert grading (`NONE` → `EMERGENCY`) with bell/desktop/webhook/command delivery, per-aircraft
   cooldown, and quiet hours.
-- Registration/type/owner from your receiver's own feed first, then an auto-downloaded local
-  database (`F8`), with a derived US N-number and country as a no-download fallback.
+- **The registry downloads itself.** Registration, type and owner come from a local database that
+  is fetched and refreshed daily in the background. Nothing to install, convert, or remember.
 - Filters, live search, a watchlist, sighting history (SQLite), and a full in-app Settings
   screen (`F2`). Nothing requires hand-editing the config file.
 - `--once` / `--watch` / `--headless` / `--batch` / `--check` for scripts and cron/systemd, zero
@@ -87,6 +94,7 @@ The wizard probes these automatically. Pick whichever answers:
 | `f` / `F4` / `/` | Filters and search |
 | `c` / `F6` | Column chooser |
 | `w` / `F7` | Watchlist editor; `w` inside it quick-adds the selected aircraft |
+| `r` | Show/hide the radar scope |
 | `u` | Cycle units: imperial / metric / aviation |
 | `p` / `P` | Pause / resume |
 | `+` / `-` | Grow / shrink filter radius |
@@ -174,19 +182,40 @@ quiet_hours = "22:00-07:00"
 **`[watchlist]`**: `path` (default `~/.config/adsbtui/watchlist.txt`, see below); `pin_top` †,
 `ignore_radius` † (stored, not yet applied)
 
-**`[registry]`**: `db` (SQLite path, managed by the Data screen), `max_age_days` (`30`, staleness
-warning), `path` (legacy bring-your-own CSV, off by default). See
-[Aircraft data](#aircraft-data-owner-type-country).
+**`[registry]`**: `db` (SQLite path), `max_age_days` (`1`, how old before a background refresh),
+`auto_update` (`true`). See [Aircraft data](#aircraft-data-owner-type-country).
 
 **`[history]`**: `db` (`""` disables sighting history), `retention_days` (`365`)
 
 **`[logging]`**: `file`, `level`, `max_bytes`, `backup_count`, `redact_home` † (not yet applied)
 
 **CLI flags**: `--config`, `--url`, `--lat`, `--lon`, `--radius`, `--proximity`, `--refresh`,
-`--registry`, `--log-file`, `--log-level`, `--units`, `--no-color`, `--debug`, `--once`,
+`--log-file`, `--log-level`, `--units`, `--no-color`, `--debug`, `--once`,
 `--watch N`, `--headless`, `--batch`, `--format {table,json,csv}`, `--check`. Run `adsbtui --help`.
 
 ---
+
+## Columns
+
+| Header | Meaning |
+|---|---|
+| FLIGHT | Callsign the aircraft is transmitting |
+| TAIL | Registration, e.g. N12345 |
+| TYPE | ICAO type code, e.g. B738 for a 737-800 |
+| ALTITUDE | Height above sea level; `GND` means on the ground |
+| CLIMB | Climb or descent rate, with an arrow for the direction |
+| SPEED | Ground speed: speed over the ground, not through the air |
+| DISTANCE | How far the aircraft is from you |
+| DIRECTION | Compass direction FROM you TO the aircraft |
+| CLOSEST PASS | How close it will get, and in how long, if it holds course |
+| OWNER | Registered owner or operator |
+| FLAGS | `MIL` military, `PIA` private address, `LADD` limited display, plus size class |
+| AGE | Time since its position last updated |
+| ALERT | `OVHD` overhead, `INBND` closing on you, `EMERG` emergency squawk |
+| ICAO | The 24-bit address that uniquely identifies the airframe |
+
+Headers shorten (`ALTITUDE` to `ALT`) on a narrow terminal, and the same table is in the help
+screen (`F1`). Column choice and order are yours via `c`.
 
 ## Sortable fields
 
@@ -199,23 +228,17 @@ typing it. Aircraft with no value for the chosen field always sort last.
 
 ## Aircraft data (owner, type, country)
 
-Three sources, each filling in only what the one before it left blank:
+Two sources, each filling in only what the one before it left blank:
 
 1. **Your receiver.** Run `readsb`/`dump1090-fa` with `--db-file` and the feed itself carries
-   registration, type, description, operator, and military/PIA/LADD flags. Nothing to set up
-   here.
-2. **Auto-downloaded database** (`F8`/`D`, the Data screen). Downloads and builds a local SQLite
-   registry from the FAA bulk registry (US, public domain) or
-   [tar1090-db](https://github.com/wiedehopf/tar1090-db) (global; **non-commercial use only**,
-   shown on-screen before you download). This is the normal path, with no manual file wrangling.
-3. **Bring-your-own CSV** (`registry.path`, legacy). Only needed if you already have an
-   FAA-format CSV (`N-NUMBER,NAME,MODE S CODE HEX`) and don't want #2's download. Superseded by
-   #2 for a fresh setup; there's no reason to reach for this otherwise.
+   registration, type, description, operator, and military/PIA/LADD flags. Nothing to set up.
+2. **The local registry database.** Downloaded and rebuilt automatically in the background when
+   it is missing or more than `registry.max_age_days` old (daily by default), from
+   [tar1090-db](https://github.com/wiedehopf/tar1090-db) (global, **non-commercial use only**).
+   `F8` shows what you have, how old it is, and forces a rebuild.
 
-There's no CLI subcommand for #2 (no `adsbtui registry update`). It's a Data-screen-only action
-for now, so a fully headless first deployment needs one interactive session first.
-
----
+Anything still unknown falls back to what the ICAO address itself implies: a US N-number and a
+country of registration, computed with no data files at all.
 
 ## Watchlist
 
@@ -260,7 +283,7 @@ gets the plain error and exit code 2 instead.
 - `watchlist.pin_top`, `watchlist.ignore_radius`: a match is flagged and alerts once, but isn't
   pinned to the top or exempted from `filter.radius`.
 - `source.stale_s`, `logging.redact_home`: not yet applied.
-- No CLI registry-management subcommand. See [Aircraft data](#aircraft-data-owner-type-country).
+- No CLI subcommand to force a registry rebuild; the automatic refresh and `F8` cover it.
 
 ---
 

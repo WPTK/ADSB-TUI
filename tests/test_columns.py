@@ -7,6 +7,8 @@ from adsbtui.ui.columns import (
     _ALERT_TAGS,
     COLUMN_SPECS,
     DEFAULT_COLUMNS,
+    GUTTER,
+    ColumnSpec,
     compute_widths,
     format_header,
     format_row,
@@ -45,17 +47,17 @@ def full_aircraft() -> Aircraft:
     )
 
 
-def sep_for(ascii_only: bool) -> str:
-    return "|" if ascii_only else "│"
-
-
 def expected_total_len(columns: list[str], widths: dict[str, int]) -> int:
-    return sum(widths[c] for c in columns) + max(0, len(columns) - 1)
+    return sum(widths[c] for c in columns) + len(GUTTER) * max(0, len(columns) - 1)
 
 
-def split_by_widths(row: str, columns: list[str], widths: dict[str, int], sep: str) -> list[str]:
-    """Slice row into per-column cells using the known widths/separator, asserting the
-    separator actually shows up where expected along the way."""
+def split_by_widths(row: str, columns: list[str], widths: dict[str, int]) -> list[str]:
+    """Slice row into per-column cells using the known widths, asserting the GUTTER
+    actually shows up where expected along the way.
+
+    The separator is GUTTER for every column, in every border style and in both glyph
+    sets -- there is no per-style separator any more, so it is imported rather than
+    reconstructed here."""
     cells = []
     pos = 0
     for i, key in enumerate(columns):
@@ -63,8 +65,8 @@ def split_by_widths(row: str, columns: list[str], widths: dict[str, int], sep: s
         cells.append(row[pos : pos + w])
         pos += w
         if i != len(columns) - 1:
-            assert row[pos : pos + len(sep)] == sep
-            pos += len(sep)
+            assert row[pos : pos + len(GUTTER)] == GUTTER
+            pos += len(GUTTER)
     assert pos == len(row)
     return cells
 
@@ -137,10 +139,13 @@ class TestLayout:
         # (priority 1) and "gs" (priority 2); at a width that can only fit a handful of
         # columns, the low-priority ones must be gone while the high-priority ones remain.
         columns = ["flight", "alt", "gs", "cpa", "hex"]
-        # widths: flight 7, alt 7, gs 6, cpa 8, hex 6 -> min sum 34 + 4 seps = 38
-        result = layout(columns, available_width=25, owner_width=30)
+        # min widths: flight 8, alt 9, gs 7, cpa 10, hex 6 -> sum 40 + 4 two-char gutters
+        # = 48. 28 is exactly what flight+alt+gs cost (24 + 2 gutters), so hex and cpa are
+        # the only two that have to go.
+        result = layout(columns, available_width=28, owner_width=30)
         assert "flight" in result
         assert "alt" in result
+        assert "gs" in result
         assert "hex" not in result
         assert "cpa" not in result
 
@@ -167,7 +172,7 @@ class TestComputeWidths:
             for owner_width in (0, 10, 30, 60):
                 columns = layout(DEFAULT_COLUMNS, available_width=width, owner_width=owner_width)
                 widths = compute_widths(columns, available_width=width, owner_width=owner_width)
-                total = sum(widths.values()) + max(0, len(columns) - 1)
+                total = expected_total_len(columns, widths)
                 assert total <= width, (width, owner_width, columns, widths)
 
     def test_below_flight_floor_may_exceed_width(self):
@@ -195,8 +200,10 @@ class TestComputeWidths:
 
     def test_owner_gets_leftover_space_up_to_owner_width(self):
         columns = ["flight", "owner"]
-        # flight min 7 + owner min 5 + 1 sep = 13; give it plenty of room.
-        widths = compute_widths(columns, available_width=13 + 20, owner_width=25)
+        # The floor is both columns at their min_width plus one gutter; give it plenty of
+        # room on top of that so "owner" can reach the configured owner_width.
+        floor = COLUMN_SPECS["flight"].min_width + COLUMN_SPECS["owner"].min_width + len(GUTTER)
+        widths = compute_widths(columns, available_width=floor + 20, owner_width=25)
         assert widths["owner"] == 25
 
     def test_owner_capped_at_its_own_max_width_even_with_huge_owner_width(self):
@@ -208,7 +215,7 @@ class TestComputeWidths:
         columns = ["flight", "gs"]
         # No "owner" column present, so all leftover must go to flight or gs.
         widths = compute_widths(columns, available_width=100, owner_width=30)
-        total = sum(widths.values()) + 1
+        total = expected_total_len(columns, widths)
         assert total <= 100
         assert widths["gs"] <= COLUMN_SPECS["gs"].max_width
         assert widths["flight"] <= COLUMN_SPECS["flight"].max_width
@@ -232,8 +239,7 @@ class TestFormatRow:
         widths = compute_widths(columns, available_width=120, owner_width=30)
         for ascii_only in (False, True):
             row = format_row(ac, columns, widths, "imperial", ascii_only)
-            sep = sep_for(ascii_only)
-            cells = split_by_widths(row, columns, widths, sep)
+            cells = split_by_widths(row, columns, widths)
             for key, cell in zip(columns, cells, strict=True):
                 assert len(cell) == widths[key]
             assert len(row) == expected_total_len(columns, widths)
@@ -246,7 +252,7 @@ class TestFormatRow:
         columns = layout(DEFAULT_COLUMNS, available_width=120, owner_width=30)
         widths = compute_widths(columns, available_width=120, owner_width=30)
         row = format_row(ac, columns, widths, "imperial", False)
-        cells = split_by_widths(row, columns, widths, sep_for(False))
+        cells = split_by_widths(row, columns, widths)
         for key, cell in zip(columns, cells, strict=True):
             assert len(cell) == widths[key]
         # a handful of columns should show a real "no data" marker, not garbage
@@ -350,7 +356,7 @@ class TestFormatHeader:
         columns = layout(DEFAULT_COLUMNS, available_width=120, owner_width=30)
         widths = compute_widths(columns, available_width=120, owner_width=30)
         header = format_header(columns, widths, "unicode")
-        cells = split_by_widths(header, columns, widths, sep_for(False))
+        cells = split_by_widths(header, columns, widths)
         for key, cell in zip(columns, cells, strict=True):
             assert len(cell) == widths[key]
 
@@ -360,12 +366,34 @@ class TestFormatHeader:
         with pytest.raises(ValueError, match="unknown border style"):
             format_header(["flight"], {"flight": 8}, "not-a-style")
 
-    def test_none_border_style_uses_single_space_separator(self):
+    def test_every_border_style_uses_the_gutter_separator(self):
+        # The separator is whitespace in every style: a box-drawing pipe between cells
+        # reads as a cramped grid, so no border style gets one back.
         columns = ["flight", "alt"]
-        widths = {"flight": 8, "alt": 7}
-        header = format_header(columns, widths, "none")
-        assert len(header) == expected_total_len(columns, widths)
-        assert header[8] == " "
+        widths = {"flight": 8, "alt": 8}
+        for style in ("none", "ascii", "unicode"):
+            header = format_header(columns, widths, style)
+            assert len(header) == expected_total_len(columns, widths)
+            assert header[8 : 8 + len(GUTTER)] == GUTTER
+            # Slicing by the gutter must succeed, which is what proves it is the separator.
+            assert len(split_by_widths(header, columns, widths)) == 2
+
+    def test_header_shows_the_plain_english_name_when_it_fits(self):
+        columns = ["alt", "gs", "dist"]
+        widths = {key: COLUMN_SPECS[key].max_width for key in columns}
+        header = format_header(columns, widths, "unicode")
+        assert "ALTITUDE" in header
+        assert "SPEED" in header
+        assert "DISTANCE" in header
+
+    def test_header_falls_back_to_the_short_name_when_the_column_is_narrow(self):
+        # A header wider than its column would be truncated into something cryptic
+        # ("ALTITUD"), so the short form is used instead of a sliced long one.
+        columns = ["alt", "gs", "dist"]
+        widths = {key: len(COLUMN_SPECS[key].short) for key in columns}
+        header = format_header(columns, widths, "unicode")
+        assert "ALTITUDE" not in header
+        assert split_by_widths(header, columns, widths) == ["ALT", "SPD", "DIST"]
 
     def test_header_and_row_columns_align_unicode(self):
         ac = full_aircraft()
@@ -374,25 +402,56 @@ class TestFormatHeader:
         header = format_header(columns, widths, "unicode")
         row = format_row(ac, columns, widths, "imperial", ascii_only=False)
         assert len(header) == len(row)
-        sep = sep_for(False)
-        # Slicing both lines by the same columns/widths/separator must succeed for both,
-        # which proves the separator (and therefore every column boundary) lands at the
-        # same position in the header as in the row.
-        header_cells = split_by_widths(header, columns, widths, sep)
-        row_cells = split_by_widths(row, columns, widths, sep)
+        # Slicing both lines by the same columns/widths must succeed for both, which
+        # proves the gutter (and therefore every column boundary) lands at the same
+        # position in the header as in the row.
+        header_cells = split_by_widths(header, columns, widths)
+        row_cells = split_by_widths(row, columns, widths)
         assert len(header_cells) == len(row_cells) == len(columns)
 
     def test_header_and_row_columns_align_ascii(self):
+        # ascii_only swaps the trend glyph inside the "vs" cell, so alignment has to be
+        # re-proved for that glyph set even though the separator no longer varies.
         ac = full_aircraft()
         columns = layout(DEFAULT_COLUMNS, available_width=120, owner_width=30)
         widths = compute_widths(columns, available_width=120, owner_width=30)
         header = format_header(columns, widths, "ascii")
         row = format_row(ac, columns, widths, "imperial", ascii_only=True)
         assert len(header) == len(row)
-        sep = sep_for(True)
-        header_cells = split_by_widths(header, columns, widths, sep)
-        row_cells = split_by_widths(row, columns, widths, sep)
+        header_cells = split_by_widths(header, columns, widths)
+        row_cells = split_by_widths(row, columns, widths)
         assert len(header_cells) == len(row_cells) == len(columns)
+
+
+# --------------------------------------------------------------------------- ColumnSpec.label()
+
+
+class TestColumnSpecLabel:
+    def test_long_header_is_used_when_it_fits_exactly(self):
+        spec = COLUMN_SPECS["alt"]
+        assert spec.label(len(spec.header)) == "ALTITUDE"
+
+    def test_short_header_is_used_one_character_below_the_long_one(self):
+        spec = COLUMN_SPECS["alt"]
+        assert spec.label(len(spec.header) - 1) == "ALT"
+
+    def test_spec_without_a_short_form_keeps_its_long_header(self):
+        # Truncating is still better than blanking the column, so a spec with no short
+        # form hands back the long name and lets sanitize_cell() clip it.
+        spec = ColumnSpec("x", "VERYLONGNAME", min_width=2, max_width=4, priority=0)
+        assert spec.label(2) == "VERYLONGNAME"
+
+    def test_every_short_form_fits_its_columns_minimum_width(self):
+        # The short form exists precisely for the narrow case, so a short form that gets
+        # truncated at min_width would leave no readable header at any size.
+        for key, spec in COLUMN_SPECS.items():
+            assert len(spec.short) <= spec.min_width, f"{key} short {spec.short!r} does not fit"
+
+    def test_every_long_header_fits_its_columns_maximum_width(self):
+        # A generous terminal grows each column to max_width, and that is the size at
+        # which the plain-English name has to be readable in full.
+        for key, spec in COLUMN_SPECS.items():
+            assert len(spec.header) <= spec.max_width, f"{key} header {spec.header!r} is too wide"
 
 
 def _cell_for(key: str, ac, unit_system: str = "imperial", width: int | None = None) -> str:
