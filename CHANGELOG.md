@@ -71,11 +71,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (or `--config`/`ADSBTUI_*`). Editing module constants no longer does anything (F09).
 - `adsbtui.py` at the repository root is now a thin compatibility shim that forwards to the
   package, so `python3 adsbtui.py ...` keeps working.
-- `MASTER.csv` removed from version control (F30); supply your own registry CSV via
-  `registry.path`.
+- `MASTER.csv` removed from version control (F30); the registry is auto-downloaded and built by
+  the Data screen instead (see below), with `registry.path` kept only as an optional legacy
+  bring-your-own CSV for anyone who already has one.
 - README rewritten (F12-F15, F45): the old one documented a script name that never existed, a
   nonexistent `curses` PyPI package, a placeholder clone URL, the wrong FAA download URL and
   delimiter, and `chmod`/`chown` steps that do nothing.
+- **README rewritten again, end to end**: cut by nearly half, reformatted into scannable tables
+  instead of prose paragraphs, and dropped a "Contributing" section that made no sense for a
+  single-maintainer project. Also fixed the CSV framing left over from the first rewrite --
+  `registry.path` (the bring-your-own CSV) had drifted to reading like the primary way to get
+  owner/type data, when the auto-downloaded database (Data screen, `F8`) has been the intended
+  main path since it shipped; the in-app Settings and config-file-comment text for that key
+  picked up the same correction.
 
 ### Fixed
 - `--once`/`--watch`/`--batch` previously ignored `registry.path` and every `[filter]` setting

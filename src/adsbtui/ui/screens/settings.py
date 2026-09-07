@@ -226,8 +226,8 @@ _LABELS_AND_HELP: dict[str, tuple[str, str]] = {
         "Days before the Data screen flags a downloaded database as stale.",
     ),
     "registry.path": (
-        "Registry CSV",
-        "FAA registry CSV used to fill the owner column; empty disables owner lookup.",
+        "Registry CSV (legacy)",
+        "Optional bring-your-own FAA CSV. Prefer downloading via the Data screen (F8) instead.",
     ),
     "history.db": (
         "History database",
