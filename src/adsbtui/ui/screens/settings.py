@@ -133,7 +133,9 @@ _LABELS_AND_HELP: dict[str, tuple[str, str]] = {
     "display.density": ("Density", "Row density: compact, normal, or wide."),
     "display.sort_key": (
         "Sort key",
-        "What the table is sorted by: distance, altitude, or callsign.",
+        "What the table is sorted by. Any column: distance, altitude, callsign, reg, "
+        "type, gs, vs, brg, cpa, owner, flags, age, alert, or hex. Pick from the Sort "
+        "screen (s) rather than typing one of these here.",
     ),
     "display.sort_reverse": ("Reverse sort", "Sort descending instead of ascending."),
     "display.stale_after_s": (

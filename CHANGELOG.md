@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **The table sorts by any visible field**, not just distance, altitude, or callsign:
+  registration, type, ground speed, vertical speed, bearing, closest-point-of-approach,
+  owner, MIL/PIA/LADD/category flags, position age, alert level, and the raw hex code are
+  all now options on the Sort screen (`s`/`F5`). Sorting by CPA and by flags matches what
+  the column itself shows (an on-ground aircraft's hidden CPA projection stays hidden from
+  the sort too, and flags sort by the same decoded tag text the column renders); sorting
+  by alert level ranks by severity, least alarming to `EMERGENCY`.
 - **A first run with no config starts the setup wizard** instead of failing with
   "source.url is required" and a pointer to the README -- which was the exact moment the
   wizard existed to handle. It only ever runs for a person at a terminal: scripted modes

@@ -182,7 +182,7 @@ Environment variable names follow `ADSBTUI_<SECTION>_<KEY>`, e.g. `ADSBTUI_HOME_
 | `owner_width` | `30` | Preferred width, in characters, of the owner column. |
 | `borders` | `"unicode"` | `unicode`/`ascii`/`none` box-drawing style for the header divider and column separators. Editable from the Columns screen. |
 | `density` | `"normal"` | `compact`/`normal`/`wide`. Stored and editable from the Columns screen; not yet read by the renderer. |
-| `sort_key` | `"distance"` | `distance`, `altitude`, or `callsign`. Aircraft with no value for the chosen key always sort last. Editable from the Sort screen (`s`); `S` reverses without opening it. |
+| `sort_key` | `"distance"` | Any column: `distance`, `altitude`, `callsign`, `reg`, `type`, `gs`, `vs`, `brg`, `cpa`, `owner`, `flags`, `age`, `alert`, or `hex`. Aircraft with no value for the chosen key always sort last. Editable from the Sort screen (`s`); `S` reverses without opening it. |
 | `sort_reverse` | `false` | Reverse the sort order. |
 | `stale_after_s` | `15.0` | Seconds since the last position update before a row is marked stale (dimmed). |
 | `linger_s` | `30.0` | Seconds an aircraft that dropped out of the feed is still shown (marked lost) before being removed. |
@@ -364,7 +364,7 @@ watchlist match but not yet applied to sorting or filtering — see
 | `Enter` / `d` | Detail pane for the selected aircraft (every field the feed provides) |
 | `up` / `down`, `k` / `j` | Move the selection |
 | `PgUp` / `PgDn`, `Home` / `End` | Scroll the table |
-| `s` / `F5` | Sort screen (distance, altitude, or callsign) |
+| `s` / `F5` | Sort screen -- every visible field, not just distance/altitude/callsign |
 | `S` | Reverse the current sort without opening a screen |
 | `f` / `F4` / `/` | Filters and search: ground traffic, non-ICAO addresses, altitude band, text search |
 | `c` / `F6` | Column chooser: which columns, in what order, plus density and border style |
