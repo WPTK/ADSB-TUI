@@ -16,7 +16,7 @@ pip install -e .
 ```
 
 - Windows needs curses: `pip install -e ".[windows]"`
-- Tests/lint: `pip install -e ".[dev]"` — then `pytest -q` and `ruff check src tests`
+- Tests/lint: `pip install -e ".[dev]"`, then `pytest -q` and `ruff check src tests`
 
 ---
 
@@ -42,7 +42,9 @@ Or drive it from flags with no config file at all:
 adsbtui --url http://192.168.1.50/skyaware/data/aircraft.json --lat 37.7749 --lon -122.4194
 ```
 
-**Pointing at your receiver** — the wizard probes these automatically; pick whichever answers:
+### Pointing at your receiver
+
+The wizard probes these automatically. Pick whichever answers:
 
 | URL | Image |
 |---|---|
@@ -56,16 +58,17 @@ adsbtui --url http://192.168.1.50/skyaware/data/aircraft.json --lat 37.7749 --lo
 
 ## Features
 
-- Background fetch thread — the UI never blocks on the network.
+- A background thread fetches data, so the UI never blocks on the network.
 - Correct units (the original tool understated speed by ~46%).
 - Resize-safe table; drops low-priority columns as the terminal narrows.
-- **Every column is sortable** (`s`), not just distance/altitude/callsign.
+- Sort by any of the 14 columns (`s`). The original build only offered three: distance,
+  altitude, callsign.
 - Alert grading (`NONE` → `EMERGENCY`) with bell/desktop/webhook/command delivery, per-aircraft
   cooldown, and quiet hours.
 - Registration/type/owner from your receiver's own feed first, then an auto-downloaded local
   database (`F8`), with a derived US N-number and country as a no-download fallback.
 - Filters, live search, a watchlist, sighting history (SQLite), and a full in-app Settings
-  screen (`F2`) — nothing requires hand-editing the config file.
+  screen (`F2`). Nothing requires hand-editing the config file.
 - `--once` / `--watch` / `--headless` / `--batch` / `--check` for scripts and cron/systemd, zero
   curses dependency.
 
@@ -76,11 +79,11 @@ adsbtui --url http://192.168.1.50/skyaware/data/aircraft.json --lat 37.7749 --lo
 | Key | Action |
 |---|---|
 | `F1` / `?` | Help |
-| `F2` / `,` | Settings — every config key, validated, saves to `config.toml` and applies live |
-| `F8` / `D` | Data — download/rebuild the registry database, with progress |
+| `F2` / `,` | Settings: every config key, validated, saves to `config.toml` and applies live |
+| `F8` / `D` | Data: download or rebuild the registry database, with progress |
 | `Enter` / `d` | Detail pane for the selected aircraft |
 | `↑`/`↓`, `k`/`j`, `PgUp`/`PgDn`, `Home`/`End` | Move / scroll |
-| `s` / `F5` | Sort — any column; `S` reverses without opening it |
+| `s` / `F5` | Sort: any column; `S` reverses without opening it |
 | `f` / `F4` / `/` | Filters and search |
 | `c` / `F6` | Column chooser |
 | `w` / `F7` | Watchlist editor; `w` inside it quick-adds the selected aircraft |
@@ -96,9 +99,9 @@ Columns apply live but revert on restart unless also saved via Settings.
 
 ## Configuration
 
-Precedence: **CLI flag > `ADSBTUI_<SECTION>_<KEY>` env var > `config.toml` > default.** Every key
+Precedence: CLI flag > `ADSBTUI_<SECTION>_<KEY>` env var > `config.toml` > default. Every key
 below is also in the Settings screen (`F2`) with the same default and a one-line help text.
-Keys marked **†** are stored/validated/editable but don't affect behavior yet — see
+Keys marked **†** are stored, validated, and editable, but don't affect behavior yet. See
 [Known gaps](#known-gaps).
 
 **`[source]`**
@@ -112,7 +115,7 @@ Keys marked **†** are stored/validated/editable but don't affect behavior yet 
 | `backoff_max_s` | `30.0` | Cap on fetch-retry backoff |
 | `max_bytes` | `8000000` | Reject a larger response |
 
-**`[home]`** — `lat` / `lon` (`0.0`, required, `(0,0)` is rejected as an unedited placeholder)
+**`[home]`**: `lat` / `lon` (`0.0`, required; `(0,0)` is rejected as an unedited placeholder)
 
 **`[filter]`**
 
@@ -135,7 +138,7 @@ Keys marked **†** are stored/validated/editable but don't affect behavior yet 
 | `owner_width` | `30` | Owner column width |
 | `borders` | `"unicode"` | `unicode` / `ascii` / `none` |
 | `density` † | `"normal"` | Not read by the renderer yet |
-| `sort_key` | `"distance"` | Any column — see [Sortable fields](#sortable-fields) |
+| `sort_key` | `"distance"` | Any column, see [Sortable fields](#sortable-fields) |
 | `sort_reverse` | `false` | Reverse the sort |
 | `stale_after_s` | `15.0` | Dim a row after this long with no position update |
 | `linger_s` | `30.0` | Keep a dropped aircraft on screen (marked lost) this long |
@@ -168,16 +171,16 @@ webhook_format = "ntfy"
 quiet_hours = "22:00-07:00"
 ```
 
-**`[watchlist]`** — `path` (default `~/.config/adsbtui/watchlist.txt`, see below); `pin_top` †,
+**`[watchlist]`**: `path` (default `~/.config/adsbtui/watchlist.txt`, see below); `pin_top` †,
 `ignore_radius` † (stored, not yet applied)
 
-**`[registry]`** — see [Aircraft data](#aircraft-data-owner-type-country):
-`db` (SQLite path, managed by the Data screen), `max_age_days` (`30`, staleness warning),
-`path` (legacy bring-your-own CSV, off by default)
+**`[registry]`**: `db` (SQLite path, managed by the Data screen), `max_age_days` (`30`, staleness
+warning), `path` (legacy bring-your-own CSV, off by default). See
+[Aircraft data](#aircraft-data-owner-type-country).
 
-**`[history]`** — `db` (`""` disables sighting history), `retention_days` (`365`)
+**`[history]`**: `db` (`""` disables sighting history), `retention_days` (`365`)
 
-**`[logging]`** — `file`, `level`, `max_bytes`, `backup_count`, `redact_home` † (not yet applied)
+**`[logging]`**: `file`, `level`, `max_bytes`, `backup_count`, `redact_home` † (not yet applied)
 
 **CLI flags**: `--config`, `--url`, `--lat`, `--lon`, `--radius`, `--proximity`, `--refresh`,
 `--registry`, `--log-file`, `--log-level`, `--units`, `--no-color`, `--debug`, `--once`,
@@ -190,7 +193,7 @@ quiet_hours = "22:00-07:00"
 `display.sort_key` accepts any of: `distance`, `altitude`, `callsign`, `reg`, `type`, `gs`
 (ground speed), `vs` (vertical speed), `brg` (bearing), `cpa` (closest approach), `owner`,
 `flags`, `age` (position age), `alert`, `hex`. Pick one from the Sort screen (`s`) rather than
-typing it — aircraft with no value for the chosen field always sort last.
+typing it. Aircraft with no value for the chosen field always sort last.
 
 ---
 
@@ -199,17 +202,17 @@ typing it — aircraft with no value for the chosen field always sort last.
 Three sources, each filling in only what the one before it left blank:
 
 1. **Your receiver.** Run `readsb`/`dump1090-fa` with `--db-file` and the feed itself carries
-   registration, type, description, operator, and military/PIA/LADD flags — nothing to set up
+   registration, type, description, operator, and military/PIA/LADD flags. Nothing to set up
    here.
 2. **Auto-downloaded database** (`F8`/`D`, the Data screen). Downloads and builds a local SQLite
    registry from the FAA bulk registry (US, public domain) or
-   [tar1090-db](https://github.com/wiedehopf/tar1090-db) (global, **non-commercial use only** —
-   shown on-screen before you download). This is the normal path; no manual file wrangling.
+   [tar1090-db](https://github.com/wiedehopf/tar1090-db) (global; **non-commercial use only**,
+   shown on-screen before you download). This is the normal path, with no manual file wrangling.
 3. **Bring-your-own CSV** (`registry.path`, legacy). Only needed if you already have an
    FAA-format CSV (`N-NUMBER,NAME,MODE S CODE HEX`) and don't want #2's download. Superseded by
-   #2 for a fresh setup — there's no reason to reach for this otherwise.
+   #2 for a fresh setup; there's no reason to reach for this otherwise.
 
-There's no CLI subcommand for #2 (no `adsbtui registry update`) — it's a Data-screen-only action
+There's no CLI subcommand for #2 (no `adsbtui registry update`). It's a Data-screen-only action
 for now, so a fully headless first deployment needs one interactive session first.
 
 ---
@@ -233,7 +236,7 @@ match sets `is_watched` (shown in `flags`) and fires the `watchlist` alert event
 
 ## Non-interactive modes
 
-Zero curses dependency — safe for a script, cron job, or systemd unit.
+Zero curses dependency, safe for a script, cron job, or systemd unit.
 
 ```bash
 adsbtui --once                     # fetch once, print a table, exit (4 on error)
@@ -245,26 +248,26 @@ adsbtui --batch                    # streams SEEN/NEW/LOST/ALERT lines, for pipi
 adsbtui --check                    # validate config, fetch once, print OK/ERROR
 ```
 
-The setup wizard never runs in any of these, or off a non-interactive terminal — a broken config
+The setup wizard never runs in any of these, or off a non-interactive terminal. A broken config
 gets the plain error and exit code 2 instead.
 
 ---
 
 ## Known gaps
 
-- `display.theme`, `display.density`, `display.vs_threshold_fpm` — stored and editable, not yet
+- `display.theme`, `display.density`, `display.vs_threshold_fpm`: stored and editable, not yet
   read by the renderer.
-- `watchlist.pin_top`, `watchlist.ignore_radius` — a match is flagged and alerts once, but isn't
+- `watchlist.pin_top`, `watchlist.ignore_radius`: a match is flagged and alerts once, but isn't
   pinned to the top or exempted from `filter.radius`.
-- `source.stale_s`, `logging.redact_home` — not yet applied.
-- No CLI registry-management subcommand — see [Aircraft data](#aircraft-data-owner-type-country).
+- `source.stale_s`, `logging.redact_home`: not yet applied.
+- No CLI registry-management subcommand. See [Aircraft data](#aircraft-data-owner-type-country).
 
 ---
 
 ## License
 
-[CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/) — public-domain-equivalent;
-no warranty, and CC0 doesn't waive any trademark/patent rights that separately apply.
+[CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/): public-domain-equivalent,
+no warranty. It doesn't waive any trademark or patent rights that separately apply.
 
 Data pulled in via the Data screen carries its own terms, shown on-screen before download: the
 FAA registry extract is public domain, tar1090-db is **non-commercial use only**. Neither is
