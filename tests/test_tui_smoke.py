@@ -47,8 +47,11 @@ STARTUP_TIMEOUT_S = 30.0
 #: Upper bound on how long a clean shutdown may take after the quit key is sent. Generous
 #: for the same reason as STARTUP_TIMEOUT_S: a shared/loaded CI runner (macOS runners in
 #: particular have shown wide variance) can take much longer than a shutdown that is
-#: normally near-instant (a 200ms getch() poll plus a 2s fetch-thread join budget).
-EXIT_TIMEOUT_S = 45.0
+#: normally near-instant (a 200ms getch() poll plus a 2s fetch-thread join budget). Raised
+#: from 45s after a completely unrelated (docs-only) PR still hit "TIMEOUT-still-running"
+#: on two different macOS jobs in one run, each on a different test -- not a hang tied to
+#: any particular key sequence, just a runner slow enough on that run to blow the budget.
+EXIT_TIMEOUT_S = 90.0
 
 
 def _run_tui(cols: int, rows: int, keys: bytes) -> tuple[str, int | str]:
