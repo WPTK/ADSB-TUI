@@ -7,11 +7,11 @@ Three layers, deliberately separate:
   * registry_update.py -- fetching public bulk registries (tar1090-db, the FAA
                      Releasable Aircraft Database) into a local SQLite cache.
   * providers.py  -- the lookup layer that resolves one aircraft across the live feed,
-                     that SQLite cache, a legacy FAA CSV and the derived values, choosing
-                     a winner per FIELD rather than per record.
+                     that SQLite cache and the derived values, choosing a winner per FIELD
+                     rather than per record.
 
-The entry point almost every caller wants is Enricher.from_paths(db_path, csv_path),
-then enricher.apply(aircraft) once per aircraft per poll.
+The entry point almost every caller wants is Enricher.from_paths(db_path), then
+enricher.apply(aircraft) once per aircraft per poll.
 """
 
 from __future__ import annotations
@@ -28,7 +28,6 @@ from adsbtui.enrich.derived import (
 from adsbtui.enrich.providers import (
     DEFAULT_ORDER,
     AircraftInfo,
-    CsvProvider,
     DerivedProvider,
     Enricher,
     FeedProvider,
@@ -40,7 +39,6 @@ from adsbtui.enrich.providers import (
 __all__ = [
     "DEFAULT_ORDER",
     "AircraftInfo",
-    "CsvProvider",
     "DerivedProvider",
     "Enricher",
     "FeedProvider",

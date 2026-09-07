@@ -1,7 +1,7 @@
 """Normalize raw readsb/dump1090-fa aircraft.json data into the Aircraft/Snapshot model.
 
 This module is pure: no curses calls, no network calls, no global state. It only turns
-untrusted dicts (parsed JSON, CSV rows) into the dataclasses defined in model.py, and it
+untrusted dicts (parsed JSON) into the dataclasses defined in model.py, and it
 must never raise on malformed input -- a single bad record must not blank the whole table,
 and an untrusted string must never crash curses.addstr with an embedded NUL or control
 character.
@@ -9,7 +9,6 @@ character.
 
 from __future__ import annotations
 
-import csv
 from typing import Any
 
 from adsbtui.model import Aircraft, Snapshot
@@ -157,25 +156,3 @@ def parse_aircraft(raw: dict) -> Aircraft | None:
         )
     except Exception:
         return None
-
-
-def load_owner_registry(path: str) -> dict[str, str]:
-    """Load the FAA MASTER.txt-style owner registry CSV into a hex -> name dict.
-
-    Reads with encoding="utf-8-sig" to tolerate the UTF-8 BOM the real FAA extract carries,
-    and newline="" as required by the csv module. Does not catch FileNotFoundError/OSError --
-    those propagate to the caller so a missing/unreadable registry file is visible instead of
-    silently producing an empty dict.
-    """
-    registry: dict[str, str] = {}
-    with open(path, encoding="utf-8-sig", newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            hex_code = (row.get("MODE S CODE HEX") or "").strip().upper()
-            if not hex_code:
-                continue
-            name = (row.get("NAME") or "").strip()
-            if not name:
-                continue
-            registry[hex_code] = name
-    return registry

@@ -39,8 +39,10 @@ FIXTURE = os.path.join(REPO_ROOT, "tests", "fixtures", "aircraft.json")
 ENTRY = os.path.join(REPO_ROOT, "adsbtui.py")
 
 #: Text that only appears once the first frame has painted, which is the real signal that
-#: curses is initialised and the event loop is reading keys.
-READY_MARKER = "ADSB-TUI"
+#: curses is initialised and the event loop is reading keys. The column header, because the
+#: title bar that used to carry the program's own name is gone -- and "flight" is the one
+#: column layout() never drops, so this marker works at every terminal size tested here.
+READY_MARKER = "FLIGHT"
 #: Upper bound on waiting for that first frame. Generous because a loaded CI runner can be
 #: an order of magnitude slower than a developer machine.
 STARTUP_TIMEOUT_S = 30.0
@@ -69,6 +71,11 @@ def _run_tui(cols: int, rows: int, keys: bytes) -> tuple[str, int | str]:
         # the child a default-sized terminal instead of the one under test.
         os.environ["LINES"] = str(rows)
         os.environ["COLUMNS"] = str(cols)
+        # The app refreshes the aircraft registry in the background on startup by default.
+        # These tests are about curses, not downloads: leaving it on would have every run
+        # pull several megabytes over the network and rewrite the developer's real
+        # registry database as a side effect of a rendering test.
+        os.environ["ADSBTUI_REGISTRY_AUTO_UPDATE"] = "false"
         os.chdir(REPO_ROOT)
         os.execv(
             sys.executable,
@@ -171,7 +178,9 @@ def test_renders_expected_chrome_and_drops_columns_when_narrow():
     wide_clean = _strip_ansi(wide)
     narrow_clean = _strip_ansi(narrow)
 
-    assert "ADSB-TUI" in wide_clean
+    # The top row is live state now that the title bar is gone; the aircraft count is the
+    # one field of it that is always present, so it is what proves the status line painted.
+    assert "aircraft" in wide_clean
     # The key bar is truncated to the terminal width, so the keys a user cannot afford to
     # lose -- help and quit -- must survive that truncation on a normal-width terminal.
     assert "Help" in wide_clean
@@ -179,5 +188,7 @@ def test_renders_expected_chrome_and_drops_columns_when_narrow():
     assert "FLIGHT" in wide_clean and "FLIGHT" in narrow_clean
 
     # Lower-priority columns must be dropped rather than truncated on a narrow terminal.
-    assert "TYPE" in wide_clean
-    assert "TYPE" not in narrow_clean
+    # "reg" (header "TAIL") is the one to check: it survives at 120 columns, where the
+    # scope takes a third of the width, and is gone by 40.
+    assert "TAIL" in wide_clean
+    assert "TAIL" not in narrow_clean

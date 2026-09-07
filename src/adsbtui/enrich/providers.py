@@ -2,28 +2,27 @@
 
 The point of this layer is that no single source knows everything. The receiver's own
 feed knows the callsign and, if the operator configured a db-file, sometimes a
-registration; a downloaded tar1090-db knows type codes and owners worldwide; an FAA CSV
-knows US owner names; and the hex address itself always knows at least the country, and
-for a US aircraft the original N-number. So resolution happens per field, not per record:
+registration; a downloaded registry knows type codes and owners worldwide; and the hex
+address itself always knows at least the country, and for a US aircraft the original
+N-number. So resolution happens per field, not per record:
 each provider reports only what it positively knows, and the first provider in priority
 order that has an answer for a given field wins that field. A record can therefore end up
 with its registration from the feed, its owner from the database and its country derived,
 and AircraftInfo.sources records which provider supplied each one.
 
-Default priority is feed > db > csv > derived, which is deliberate: the receiver is
+Default priority is feed > db > derived, which is deliberate: the receiver is
 looking at the actual transmission, a downloaded registry is a snapshot, and a derived
 N-number is only the address's ORIGINAL allocation (see derived.py). The order is
 configurable because a user with a very stale receiver db-file may reasonably want the
 downloaded registry to win.
 
-Nothing here raises on missing data. A user with no registry database, no CSV and no
-network still gets a derived registration and country for every US aircraft, which is the
-whole reason the derived provider exists.
+Nothing here raises on missing data. A user with no registry database and no network
+still gets a derived registration and country for every US aircraft, which is the whole
+reason the derived provider exists.
 """
 
 from __future__ import annotations
 
-import csv
 import os
 import sqlite3
 from collections.abc import Sequence
@@ -36,10 +35,9 @@ from adsbtui.enrich.derived import (
     registration_from_hex,
 )
 from adsbtui.model import Aircraft
-from adsbtui.normalize import load_owner_registry
 
 #: Provider names in descending priority, as accepted by Enricher.from_paths().
-DEFAULT_ORDER: tuple[str, ...] = ("feed", "db", "csv", "derived")
+DEFAULT_ORDER: tuple[str, ...] = ("feed", "db", "derived")
 
 #: How many hex addresses to remember resolved provider results for. A busy receiver sees
 #: a few hundred distinct aircraft an hour, so this holds a session comfortably.
@@ -170,38 +168,6 @@ class SqliteProvider:
         return info if _has_content(info) else None
 
 
-class CsvProvider:
-    """A legacy hand-managed FAA MASTER.txt-style CSV, if the user still has one.
-
-    Kept because registry.path is an existing setting and existing setups must not break.
-    It only ever supplies an owner name -- that is all load_owner_registry() extracts. The
-    file is read once, lazily; an unreadable file disables the provider instead of raising
-    on every lookup.
-    """
-
-    name = "csv"
-    per_aircraft = False
-
-    def __init__(self, path: str) -> None:
-        self.path = path
-        self._registry: dict[str, str] | None = None
-
-    def _load(self) -> dict[str, str]:
-        if self._registry is None:
-            try:
-                self._registry = load_owner_registry(self.path)
-            except (OSError, UnicodeError, csv.Error):
-                self._registry = {}
-        return self._registry
-
-    def lookup(self, hex_id: str, aircraft: Aircraft | None = None) -> AircraftInfo | None:
-        key = normalize_hex(hex_id)
-        if key is None:
-            return None
-        owner = self._load().get(key.upper())
-        return AircraftInfo(owner=owner) if owner else None
-
-
 class DerivedProvider:
     """Everything computable from the address itself: N-number, country, military block."""
 
@@ -259,16 +225,15 @@ class Enricher:
     def from_paths(
         cls,
         db_path: str | None = None,
-        csv_path: str | None = None,
         order: Sequence[str] = DEFAULT_ORDER,
         cache_size: int = DEFAULT_CACHE_SIZE,
     ) -> Enricher:
         """Build an Enricher from configured paths, honoring a priority order.
 
-        Providers whose data the user has not configured are simply left out, so passing
-        neither path still yields a working (derived-only) Enricher. An unknown name in
-        order is a configuration mistake and raises ValueError rather than silently
-        disabling enrichment.
+        A database that has not been downloaded yet is simply left out, so passing no
+        path still yields a working (feed plus derived) Enricher. An unknown name in order
+        is a configuration mistake and raises ValueError rather than silently disabling
+        enrichment.
         """
         providers: list[Provider] = []
         for name in order:
@@ -277,9 +242,6 @@ class Enricher:
             elif name == "db":
                 if db_path:
                     providers.append(SqliteProvider(db_path))
-            elif name == "csv":
-                if csv_path:
-                    providers.append(CsvProvider(csv_path))
             elif name == "derived":
                 providers.append(DerivedProvider())
             else:

@@ -19,6 +19,9 @@ Two things drive the design:
     NON-COMMERCIAL USE ONLY and the FAA extract is public domain; a user deciding whether
     to download something is exactly the person who needs to read the terms, and this is
     the screen where that decision is made.
+  * Updating from here is a manual override. The app refreshes the registry on its own
+    when it is missing or stale, so this screen exists to show what you have and to force
+    a rebuild, not because anything depends on you visiting it.
 
 The updater itself is injected (defaulting to registry_update's real entry points), which
 is what lets the tests drive the whole thing -- progress, refusal, completion, failure --
@@ -56,10 +59,6 @@ _ESCAPE_KEY = 27
 _UPDATE_KEY = ord("u")
 _UPDATE_ALL_KEY = ord("U")
 
-#: The legacy user-supplied CSV. It is not a row in the meta table -- nothing fetched it,
-#: so its "age" is the file's mtime and its size is however many lines it has.
-SOURCE_CSV = "csv"
-
 #: How wide the progress bar is drawn, terminal permitting. A full-width bar reads as a
 #: loading screen; a short one reads as one line of status among several.
 _BAR_WIDTH = 40
@@ -68,7 +67,7 @@ SECONDS_PER_DAY = 86400.0
 
 #: Past this, a registry is old enough that a missing registration or a stale owner is
 #: more likely the database's fault than the aircraft's. Overridable per screen.
-DEFAULT_STALE_AFTER_DAYS = 30.0
+DEFAULT_STALE_AFTER_DAYS = 1.0
 
 #: (source, db_path, progress_fn) -> BuildResult. The screen never calls the registry
 #: builders directly; it calls one of these, so tests can substitute a fake.
@@ -86,44 +85,25 @@ def _clip(text: str, width: int) -> str:
 class SourceSpec:
     """One registry source as the screen presents it.
 
-    'license' is user-facing text shown on the source's own row, and 'can_update' is
-    whether this screen is able to go and fetch it (the legacy CSV is a file the user
-    points at, so it is listed but never downloaded).
+    'license' is user-facing text shown on the source's own row. Every source listed here
+    is one this screen can fetch; there is no "look at it but do not touch" case left.
     """
 
     key: str
     label: str
     license: str
-    can_update: bool
 
 
 TAR1090_SPEC = SourceSpec(
     key=SOURCE_TAR1090,
     label="tar1090-db",
     license="non-commercial use only",
-    can_update=True,
 )
 FAA_SPEC = SourceSpec(
     key=SOURCE_FAA,
     label="FAA",
     license="public domain",
-    can_update=True,
 )
-CSV_SPEC = SourceSpec(
-    key=SOURCE_CSV,
-    label="legacy CSV",
-    license="your own file, not fetched by adsbtui",
-    can_update=False,
-)
-
-
-@dataclass(frozen=True)
-class LocalFile:
-    """What a plain file on disk can tell us: is it there, how big, how old."""
-
-    exists: bool
-    row_count: int | None = None
-    modified_at: float | None = None
 
 
 @dataclass(frozen=True)
@@ -187,40 +167,6 @@ def format_status(status: SourceStatus) -> str:
     return f"{status.spec.label:<11} {detail:<16} {age:<20} {status.spec.license}"
 
 
-def probe_csv(path: str) -> LocalFile:
-    """Presence, data-row count and mtime of a legacy registry CSV.
-
-    Rows are counted by streaming the file and counting newlines rather than parsing it:
-    the screen only needs the size of the thing, and one sequential read is cheap enough
-    to do whenever the listing is refreshed. A file we can stat but not read still counts
-    as present -- that is a permissions problem worth showing, not a missing source.
-    """
-    if not path:
-        return LocalFile(exists=False)
-    expanded = os.path.expanduser(path)
-    try:
-        stat = os.stat(expanded)
-    except OSError:
-        return LocalFile(exists=False)
-
-    newlines = 0
-    last_byte = b"\n"
-    try:
-        with open(expanded, "rb") as handle:
-            while True:
-                chunk = handle.read(1 << 20)
-                if not chunk:
-                    break
-                newlines += chunk.count(b"\n")
-                last_byte = chunk[-1:]
-    except OSError:
-        return LocalFile(exists=True, row_count=None, modified_at=stat.st_mtime)
-
-    # A final line with no trailing newline still counts; the header line does not.
-    lines = newlines + (1 if last_byte != b"\n" else 0)
-    return LocalFile(exists=True, row_count=max(0, lines - 1), modified_at=stat.st_mtime)
-
-
 def default_updater(source: str, db_path: str, progress_fn: ProgressFn) -> BuildResult:
     """Fetch one source from its canonical URL into db_path (the real, networked path)."""
     if source == SOURCE_TAR1090:
@@ -233,33 +179,29 @@ def default_updater(source: str, db_path: str, progress_fn: ProgressFn) -> Build
 class DataScreen:
     """Lists the registry sources and updates them on a background thread.
 
-    db_path is the SQLite registry the builders write to; csv_path is the optional legacy
-    registry CSV (an empty string simply leaves that row off the list). meta_reader and
-    csv_probe exist so the listing can be driven from fakes in tests; updater is the one
-    injection that matters in normal use, since it is the only thing here that would
-    otherwise touch the network.
+    db_path is the SQLite registry the builders write to. meta_reader exists so the listing
+    can be driven from fakes in tests; updater is the one injection that matters in normal
+    use, since it is the only thing here that would otherwise touch the network.
+
+    Updating from here is a manual override, not the normal path: the app refreshes the
+    registry itself in the background when it is missing or stale, so this screen is for
+    seeing what you have and forcing a rebuild.
     """
 
     def __init__(
         self,
         db_path: str,
-        csv_path: str = "",
         *,
         stale_after_days: float = DEFAULT_STALE_AFTER_DAYS,
         updater: UpdateFn | None = None,
         meta_reader: Callable[[str], dict[str, SourceMeta]] = read_meta,
-        csv_probe: Callable[[str], LocalFile] = probe_csv,
     ) -> None:
         self._db_path = os.path.expanduser(db_path)
-        self._csv_path = csv_path
         self._stale_after_s = max(0.0, stale_after_days) * SECONDS_PER_DAY
         self._updater: UpdateFn = updater if updater is not None else default_updater
         self._meta_reader = meta_reader
-        self._csv_probe = csv_probe
 
         self._specs: list[SourceSpec] = [TAR1090_SPEC, FAA_SPEC]
-        if csv_path:
-            self._specs.append(CSV_SPEC)
 
         # An RLock, not a Lock: render_lines() takes it to snapshot the update state and
         # then calls the picker, whose labeler reads the statuses under the same lock.
@@ -314,17 +256,6 @@ class DataScreen:
         now = time.time()
         statuses: dict[str, SourceStatus] = {}
         for spec in self._specs:
-            if spec.key == SOURCE_CSV:
-                probe = self._csv_probe(self._csv_path)
-                age = None if probe.modified_at is None else max(0.0, now - probe.modified_at)
-                statuses[spec.key] = SourceStatus(
-                    spec=spec,
-                    present=probe.exists,
-                    row_count=probe.row_count,
-                    age_s=age,
-                    stale=self._is_stale(age),
-                )
-                continue
             entry = meta.get(spec.key)
             if entry is None:
                 statuses[spec.key] = SourceStatus(spec=spec, present=False)
@@ -480,14 +411,10 @@ class DataScreen:
         spec = self.selected_spec
         if spec is None:
             return False
-        if not spec.can_update:
-            with self._lock:
-                self._notice = f"{spec.label} is a file you supply; adsbtui cannot fetch it"
-            return False
         return self._start([spec.key])
 
     def update_all(self) -> bool:
-        return self._start([spec.key for spec in self._specs if spec.can_update])
+        return self._start([spec.key for spec in self._specs])
 
     # ----------------------------------------------------------------------------------
     # Screen contract

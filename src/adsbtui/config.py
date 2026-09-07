@@ -128,14 +128,15 @@ class WatchlistConfig:
 
 @dataclass
 class RegistryConfig:
-    #: Optional FAA-format CSV (N-NUMBER,NAME,MODE S CODE HEX). Legacy bring-your-own
-    #: path, kept working for anyone who already had one.
-    path: str = ""
-    #: SQLite cache built by 'adsbtui registry update' from tar1090-db and/or the FAA
-    #: bulk registry. This is the path the Data screen manages and the enricher reads.
+    #: SQLite cache of registrations/types/owners, downloaded and rebuilt automatically.
     db: str = "~/.local/share/adsbtui/registry.sqlite"
-    #: Warn in the Data screen once a downloaded database is older than this.
-    max_age_days: int = 30
+    #: Refresh the database in the background once it is this old. Daily by default: the
+    #: upstream data changes daily, and a stale registry shows wrong owners rather than
+    #: no owners, which is worse.
+    max_age_days: int = 1
+    #: Download automatically when the database is missing or older than max_age_days.
+    #: Off means the Data screen (F8) is the only way to get one.
+    auto_update: bool = True
 
 
 @dataclass
@@ -447,7 +448,6 @@ def build_argparser() -> argparse.ArgumentParser:
         "--proximity", type=float, default=None, help="proximity alert radius, in miles"
     )
     parser.add_argument("--refresh", type=float, default=None, help="poll interval, in seconds")
-    parser.add_argument("--registry", default=None, help="path to an FAA registry CSV")
     parser.add_argument("--log-file", default=None, help="path to the log file")
     parser.add_argument(
         "--log-level",
@@ -511,7 +511,6 @@ def cli_overrides(args: argparse.Namespace) -> dict[str, Any]:
     maybe("filter.radius", args.radius)
     maybe("filter.proximity", args.proximity)
     maybe("source.refresh_s", args.refresh)
-    maybe("registry.path", args.registry)
     maybe("logging.file", args.log_file)
     maybe("display.units", args.units)
 

@@ -87,7 +87,7 @@ class TestRenderLines:
     def test_includes_dismiss_footer(self) -> None:
         screen = make_screen()
         lines = screen.render_lines(80, 40)
-        assert any("press any key" in line.lower() for line in lines)
+        assert any("any key closes" in line.lower() for line in lines)
 
     def test_lines_clipped_to_width(self) -> None:
         screen = make_screen()
@@ -122,7 +122,7 @@ class TestRenderLines:
         lines = screen.render_lines(80, 40)
         text = "\n".join(lines)
         assert "1.2.3" in text
-        assert "press any key" in text.lower()
+        assert "any key closes" in text.lower()
 
     def test_no_curses_window_or_input_needed(self) -> None:
         # Sanity check on the design contract: render_lines/handle_key never touch a

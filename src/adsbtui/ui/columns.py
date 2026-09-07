@@ -49,6 +49,11 @@ DEFAULT_VS_THRESHOLD_FPM = 256.0
 class ColumnSpec:
     """Static description of one table column.
 
+    header is the plain-English name shown whenever the column is wide enough for it, and
+    short is the fallback for a narrow terminal. Spelling these out is the whole point:
+    "GS"/"VS"/"BRG"/"CPA" are obvious only once you already know them, and a header nobody
+    can read is a header that is not doing its job.
+
     priority controls drop order in layout(): a LOWER number means HIGHER priority, and
     a higher-priority column is dropped LAST (survives longest as the terminal narrows).
     align is "left" or "right" and controls which side sanitize_cell() pads.
@@ -60,25 +65,71 @@ class ColumnSpec:
     max_width: int
     priority: int
     align: str = "left"
+    short: str = ""
+
+    def label(self, width: int) -> str:
+        """The longest header that fits in width, falling back to the short form."""
+        if len(self.header) <= width or not self.short:
+            return self.header
+        return self.short
 
 
 #: key -> ColumnSpec, for every column this module knows how to render.
 COLUMN_SPECS: dict[str, ColumnSpec] = {
-    "flight": ColumnSpec("flight", "FLIGHT", min_width=7, max_width=10, priority=0, align="left"),
-    "alt": ColumnSpec("alt", "ALT", min_width=9, max_width=10, priority=1, align="right"),
-    "gs": ColumnSpec("gs", "GS", min_width=7, max_width=9, priority=2, align="right"),
-    "dist": ColumnSpec("dist", "DIST", min_width=7, max_width=9, priority=3, align="right"),
-    "alert": ColumnSpec("alert", "ALERT", min_width=5, max_width=8, priority=4, align="left"),
-    "vs": ColumnSpec("vs", "VS", min_width=10, max_width=12, priority=5, align="left"),
-    "brg": ColumnSpec("brg", "BRG", min_width=7, max_width=7, priority=6, align="left"),
-    "reg": ColumnSpec("reg", "REG", min_width=6, max_width=8, priority=7, align="left"),
-    "type": ColumnSpec("type", "TYPE", min_width=4, max_width=4, priority=8, align="left"),
-    "flags": ColumnSpec("flags", "FLAGS", min_width=5, max_width=20, priority=9, align="left"),
-    "owner": ColumnSpec("owner", "OWNER", min_width=5, max_width=40, priority=10, align="left"),
-    "age": ColumnSpec("age", "AGE", min_width=3, max_width=3, priority=11, align="right"),
-    "cpa": ColumnSpec("cpa", "CPA", min_width=10, max_width=12, priority=12, align="left"),
-    "hex": ColumnSpec("hex", "HEX", min_width=6, max_width=7, priority=13, align="left"),
+    "flight": ColumnSpec(
+        "flight", "FLIGHT", min_width=8, max_width=10, priority=0, align="left", short="FLT"
+    ),
+    "alt": ColumnSpec(
+        "alt", "ALTITUDE", min_width=9, max_width=10, priority=2, align="right", short="ALT"
+    ),
+    "gs": ColumnSpec(
+        "gs", "SPEED", min_width=7, max_width=9, priority=3, align="right", short="SPD"
+    ),
+    "dist": ColumnSpec(
+        "dist", "DISTANCE", min_width=8, max_width=9, priority=1, align="right", short="DIST"
+    ),
+    "alert": ColumnSpec(
+        "alert", "ALERT", min_width=5, max_width=8, priority=4, align="left", short="ALRT"
+    ),
+    "vs": ColumnSpec(
+        "vs", "CLIMB", min_width=10, max_width=12, priority=8, align="right", short="CLIMB"
+    ),
+    "brg": ColumnSpec(
+        "brg", "DIRECTION", min_width=7, max_width=9, priority=9, align="left", short="DIR"
+    ),
+    "reg": ColumnSpec(
+        "reg", "TAIL", min_width=6, max_width=8, priority=5, align="left", short="TAIL"
+    ),
+    "type": ColumnSpec(
+        "type", "TYPE", min_width=4, max_width=4, priority=7, align="left", short="TYPE"
+    ),
+    "flags": ColumnSpec(
+        "flags", "FLAGS", min_width=5, max_width=20, priority=11, align="left", short="FLAGS"
+    ),
+    "owner": ColumnSpec(
+        "owner", "OWNER", min_width=5, max_width=40, priority=6, align="left", short="OWNER"
+    ),
+    "age": ColumnSpec(
+        "age", "AGE", min_width=3, max_width=4, priority=12, align="right", short="AGE"
+    ),
+    "cpa": ColumnSpec(
+        "cpa",
+        "CLOSEST PASS",
+        min_width=10,
+        max_width=13,
+        priority=10,
+        align="right",
+        short="CLOSEST",
+    ),
+    "hex": ColumnSpec(
+        "hex", "ICAO", min_width=6, max_width=7, priority=13, align="left", short="ICAO"
+    ),
 }
+
+#: Space between two adjacent columns. Two spaces, never a box-drawing pipe: a row of
+#: pipe-separated cells reads as a cramped grid where the eye cannot find a column, and
+#: every table tool people actually like (top, htop, ps, ls -l) separates with whitespace.
+GUTTER = "  "
 
 #: The columns shown out of the box, in display order -- mirrors DisplayConfig.columns'
 #: default in config.py.
@@ -183,7 +234,7 @@ def _cell_vs(ac: Aircraft, unit_system: str, ascii_only: bool) -> str:
         return ""
     rate = ac.baro_rate_fpm if ac.baro_rate_fpm is not None else ac.geom_rate_fpm
     unit = UNIT_SYSTEMS[unit_system]["vspeed"]
-    return f"{glyph}{format_vspeed(rate, unit)}"
+    return f"{glyph} {format_vspeed(rate, unit)}"
 
 
 def _cell_gs(ac: Aircraft, unit_system: str, ascii_only: bool) -> str:
@@ -219,8 +270,8 @@ def _cell_owner(ac: Aircraft, unit_system: str, ascii_only: bool) -> str:
     itself supplied.
 
     Many receivers run readsb with a --db-file and already send ownOp for every aircraft,
-    including non-US ones a local FAA CSV could never cover. Showing "N/A" while that value
-    sits unused in the record is the exact gap this column exists to close.
+    including non-US ones. Showing "N/A" while that value sits unused in the record is the
+    exact gap this column exists to close.
     """
     return ac.owner_name or ac.owner_operator or "N/A"
 
@@ -297,7 +348,7 @@ def layout(columns: list[str], available_width: int, owner_width: int) -> list[s
     def total_width(cols: list[str]) -> int:
         if not cols:
             return 0
-        return sum(_fit_width(c, owner_width) for c in cols) + (len(cols) - 1)
+        return sum(_fit_width(c, owner_width) for c in cols) + len(GUTTER) * (len(cols) - 1)
 
     while total_width(selected) > available_width and len(selected) > 1:
         droppable = [c for c in selected if c != "flight"]
@@ -328,7 +379,7 @@ def compute_widths(columns: list[str], available_width: int, owner_width: int) -
     if not columns:
         return widths
 
-    used = sum(widths.values()) + (len(columns) - 1)
+    used = sum(widths.values()) + len(GUTTER) * (len(columns) - 1)
     leftover = available_width - used
     if leftover <= 0:
         return widths
@@ -358,20 +409,23 @@ def compute_widths(columns: list[str], available_width: int, owner_width: int) -
 
 
 def format_header(columns: list[str], widths: dict[str, int], border_style: str) -> str:
-    """Render the header row: each column's label, sized to widths[key], separated by the
-    border style's vertical glyph (or a single space when that glyph is empty, e.g. for
-    border_style="none" -- kept at exactly one character wide either way so the total
-    length matches what layout()/compute_widths() budgeted for).
+    """Render the header row: each column's name, sized to widths[key], GUTTER-separated.
 
-    Raises ValueError if border_style is not a style theme.glyphs() recognizes.
+    Each column shows its full plain-English name when the assigned width has room for it
+    and its short form otherwise, so a wide terminal reads "ALTITUDE  SPEED  DISTANCE" and
+    a cramped one still reads "ALT  SPD  DIST" rather than something cryptic at every size.
+
+    border_style is accepted (and validated) for signature compatibility with format_row
+    and the drawing layer; the header itself is always whitespace-separated.
     """
-    sep = glyphs(border_style)["v"] or " "
-    cells = [
-        sanitize_cell(COLUMN_SPECS[key].header, widths[key], align=COLUMN_SPECS[key].align)
-        for key in columns
-        if key in COLUMN_SPECS and key in widths
-    ]
-    return sep.join(cells)
+    glyphs(border_style)  # validate the style name; the header uses no glyph of its own
+    cells = []
+    for key in columns:
+        if key not in COLUMN_SPECS or key not in widths:
+            continue
+        spec = COLUMN_SPECS[key]
+        cells.append(sanitize_cell(spec.label(widths[key]), widths[key], align=spec.align))
+    return GUTTER.join(cells)
 
 
 def format_row(
@@ -384,9 +438,9 @@ def format_row(
 ) -> str:
     """Render one aircraft's row at the given column widths.
 
-    Uses the ascii-vs-unicode vertical-bar glyph (theme.glyphs) as the one-character column
-    separator, matching whichever glyph set ascii_only selects for the trend arrows, so
-    the row and a same-style header line up. Never raises: each cell's value is built in a
+    Columns are separated by GUTTER (whitespace), exactly as format_header separates them,
+    so a row and its header always line up. ascii_only still selects the glyph set for the
+    trend arrows inside the cells. Never raises: each cell's value is built in a
     try/except, and any failure (or a missing/None field) degrades to a blank cell rather
     than propagating -- sanitize_cell() then still pads it to the right width.
 
@@ -395,7 +449,6 @@ def format_row(
     by the curses-aware drawing layer using theme.ROW_STYLES["selected"]; this plain-string
     layer can only add a text marker without changing any column's width).
     """
-    sep = glyphs("ascii")["v"] if ascii_only else glyphs("unicode")["v"]
     cells = []
     for key in columns:
         if key not in COLUMN_SPECS or key not in widths:
@@ -411,4 +464,4 @@ def format_row(
     if selected and cells and cells[0]:
         cells[0] = ">" + cells[0][1:]
 
-    return sep.join(cells)
+    return GUTTER.join(cells)

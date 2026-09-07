@@ -159,9 +159,11 @@ class TestApply:
     def test_editing_a_text_field_changes_the_returned_config(self) -> None:
         screen = make_screen()
         goto_tab(screen, "registry")
-        retype(screen, 0, "/home/pi/MASTER.csv")
+        # registry.db is the tab's first field and ships with a non-empty default, so the
+        # whole default has to be backspaced away before the new path is typed.
+        retype(screen, len(Config().registry.db), "/home/pi/registry.sqlite")
         screen.handle_key(ENTER)
-        assert screen.result().registry.path == "/home/pi/MASTER.csv"
+        assert screen.result().registry.db == "/home/pi/registry.sqlite"
 
     def test_toggling_a_bool_changes_the_returned_config(self) -> None:
         screen = make_screen()

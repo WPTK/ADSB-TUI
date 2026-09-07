@@ -65,7 +65,9 @@ def make_config() -> Config:
     cfg.watchlist.path = "/home/pi/watchlist.txt"
     cfg.watchlist.pin_top = False
     cfg.watchlist.ignore_radius = False
-    cfg.registry.path = "/home/pi/MASTER.csv"
+    cfg.registry.db = "/home/pi/registry.sqlite3"
+    cfg.registry.max_age_days = 7
+    cfg.registry.auto_update = False
     cfg.history.db = "/home/pi/history.sqlite3"
     cfg.history.retention_days = 30
     cfg.logging.file = "/var/log/adsbtui.log"
@@ -144,8 +146,8 @@ class TestRoundTrip:
 class TestEdgeCaseValues:
     def test_empty_string_round_trips(self) -> None:
         cfg = Config()
-        cfg.registry.path = ""
-        assert round_trip(cfg)["registry"]["path"] == ""
+        cfg.registry.db = ""
+        assert round_trip(cfg)["registry"]["db"] == ""
 
     def test_backslash_path_round_trips(self) -> None:
         cfg = Config()
@@ -164,8 +166,8 @@ class TestEdgeCaseValues:
 
     def test_non_ascii_string_round_trips(self) -> None:
         cfg = Config()
-        cfg.registry.path = "/home/pi/Aufzeichnungen/flugzeuge.csv"
-        assert round_trip(cfg)["registry"]["path"].endswith("flugzeuge.csv")
+        cfg.registry.db = "/home/pi/Aufzeichnungen/flugzeuge.sqlite"
+        assert round_trip(cfg)["registry"]["db"].endswith("flugzeuge.sqlite")
 
     def test_empty_list_round_trips(self) -> None:
         cfg = Config()
@@ -199,7 +201,7 @@ class TestEdgeCaseValues:
 
     def test_unsupported_value_type_raises_rather_than_writing_garbage(self) -> None:
         cfg = Config()
-        cfg.registry.path = {"not": "a string"}  # type: ignore[assignment]
+        cfg.registry.db = {"not": "a string"}  # type: ignore[assignment]
         with pytest.raises(TypeError):
             dump_config_str(cfg)
 
@@ -247,7 +249,7 @@ class TestDumpConfigFile:
         original = "# the config the user already had\n"
         target.write_text(original)
         cfg = Config()
-        cfg.registry.path = {"unwritable": True}  # type: ignore[assignment]
+        cfg.registry.db = {"unwritable": True}  # type: ignore[assignment]
         with pytest.raises(TypeError):
             dump_config(cfg, target)
         assert target.read_text() == original

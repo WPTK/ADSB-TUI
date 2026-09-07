@@ -23,6 +23,28 @@ def _action_label(action: str) -> str:
     return action.replace("_", " ").title()
 
 
+#: Column header -> what it actually means, in words. Even with the headers spelled out,
+#: a table of aviation quantities has terms that are only obvious to someone who already
+#: knows them, and "go and read the README" is not an answer while you are looking at the
+#: screen. Ordered as the columns are by default, so the list reads left to right.
+COLUMN_GLOSSARY: tuple[tuple[str, str], ...] = (
+    ("FLIGHT", "Callsign the aircraft is transmitting"),
+    ("TAIL", "Registration, e.g. N12345"),
+    ("TYPE", "ICAO type code, e.g. B738 for a 737-800"),
+    ("ALTITUDE", "Height above sea level; GND means on the ground"),
+    ("CLIMB", "Climb or descent rate, with an arrow for the direction"),
+    ("SPEED", "Ground speed: speed over the ground, not through the air"),
+    ("DISTANCE", "How far the aircraft is from you"),
+    ("DIRECTION", "Compass direction FROM you TO the aircraft"),
+    ("CLOSEST PASS", "How close it will get, and in how long, if it holds course"),
+    ("OWNER", "Registered owner or operator"),
+    ("FLAGS", "MIL military, PIA private address, LADD limited display, plus size class"),
+    ("AGE", "Time since its position last updated"),
+    ("ALERT", "OVHD overhead, INBND closing on you, EMERG emergency squawk"),
+    ("ICAO", "The 24-bit address that uniquely identifies the airframe"),
+)
+
+
 class HelpScreen:
     """Displays the full keybinding reference. Any keypress closes it.
 
@@ -56,14 +78,21 @@ class HelpScreen:
             return []
 
         key_col = max((len(label) for label in self._keymap.values()), default=0)
-        lines: list[str] = []
+        keys: list[str] = ["KEYS"]
         for action, key_label in self._keymap.items():
-            line = f"{key_label:<{key_col}}  {_action_label(action)}"
-            lines.append(_clip(line, width))
+            keys.append(_clip(f"  {key_label:<{key_col}}  {_action_label(action)}", width))
 
-        lines.append("")
-        lines.append(_clip(f"Version: {self._version}", width))
-        lines.append("")
-        lines.append(_clip("Press any key to close", width))
+        name_col = max(len(name) for name, _ in COLUMN_GLOSSARY)
+        glossary: list[str] = ["", _clip("COLUMNS", width)]
+        glossary += [
+            _clip(f"  {name:<{name_col}}  {meaning}", width) for name, meaning in COLUMN_GLOSSARY
+        ]
 
-        return lines[:height]
+        footer = ["", _clip(f"Version: {self._version}", width), _clip("Any key closes", width)]
+
+        # The glossary is the part that yields on a short terminal: losing it costs a
+        # reference the README also carries, while losing the key list or the footer would
+        # leave someone looking at a box with no way out of it named anywhere.
+        if len(keys) + len(glossary) + len(footer) <= height:
+            return keys + glossary + footer
+        return (keys + footer)[:height]

@@ -11,7 +11,6 @@ and every screen that started a thread is joined before the test ends.
 from __future__ import annotations
 
 import curses
-import os
 import threading
 import time
 
@@ -25,11 +24,9 @@ from adsbtui.enrich.registry_update import (
     SourceMeta,
 )
 from adsbtui.ui.screens.data import (
-    SOURCE_CSV,
     DataScreen,
     default_updater,
     format_age,
-    probe_csv,
 )
 
 ESC = 27
@@ -116,27 +113,6 @@ def test_format_age(seconds, expected):
     assert format_age(seconds) == expected
 
 
-def test_probe_csv_counts_data_rows(tmp_path):
-    path = tmp_path / "registry.csv"
-    path.write_text("N-NUMBER,NAME\n1,A\n2,B\n3,C\n", encoding="utf-8")
-    probe = probe_csv(str(path))
-    assert probe.exists is True
-    assert probe.row_count == 3
-    assert probe.modified_at == pytest.approx(path.stat().st_mtime)
-
-
-def test_probe_csv_counts_a_final_line_without_a_newline(tmp_path):
-    path = tmp_path / "registry.csv"
-    path.write_text("header\na\nb", encoding="utf-8")
-    assert probe_csv(str(path)).row_count == 2
-
-
-def test_probe_csv_missing_file_is_not_an_error(tmp_path):
-    probe = probe_csv(str(tmp_path / "absent.csv"))
-    assert probe.exists is False
-    assert probe.row_count is None
-
-
 def test_default_updater_refuses_an_unknown_source(tmp_path):
     # The two real sources would hit the network; an unknown one exercises the dispatch
     # without leaving the machine.
@@ -149,14 +125,9 @@ def test_default_updater_refuses_an_unknown_source(tmp_path):
 # --------------------------------------------------------------------------------------
 
 
-def test_listing_shows_rows_age_and_licensing(screens, tmp_path):
-    csv_path = tmp_path / "legacy.csv"
-    csv_path.write_text("header\na\nb\nc\nd\n", encoding="utf-8")
-    os.utime(csv_path, (time.time() - 86400, time.time() - 86400))
-
+def test_listing_shows_rows_age_and_licensing(screens):
     screen = make_screen(
         screens,
-        csv_path=str(csv_path),
         meta_reader=meta_reader_for(
             tar1090=(86400 * 3, 612431),
             faa=(3600 * 2, 291504),
@@ -175,10 +146,6 @@ def test_listing_shows_rows_age_and_licensing(screens, tmp_path):
     assert "2 hours ago" in faa_line
     assert "public domain" in faa_line
 
-    csv_line = line_for(screen, "legacy CSV")
-    assert "4 rows" in csv_line
-    assert "1 day ago" in csv_line
-
     assert "u: update" in render(screen)
 
 
@@ -189,10 +156,14 @@ def test_absent_source_is_reported_as_not_downloaded(screens):
     assert screen.status_for(SOURCE_TAR1090).present is True
 
 
-def test_legacy_csv_is_only_listed_when_configured(screens):
+def test_only_the_two_downloadable_registries_are_listed(screens):
+    # The screen's whole job is fetching registries, so every row on it must be one this
+    # screen can actually go and fetch. Since the legacy user-supplied CSV was removed
+    # that now holds structurally -- there is no "listed but un-fetchable" source left,
+    # and update_all() may fan out over every spec without filtering.
     screen = make_screen(screens)
     assert [spec.key for spec in screen.specs] == [SOURCE_TAR1090, SOURCE_FAA]
-    assert "legacy CSV" not in render(screen)
+    assert screen.update_all() is True
 
 
 def test_old_source_is_flagged_stale(screens):
@@ -332,9 +303,7 @@ def test_completion_is_reported_to_the_caller_and_refreshes_the_listing(screens)
     assert "4,242 rows" in render(screen)
 
 
-def test_update_all_runs_every_downloadable_source_in_one_thread(screens, tmp_path):
-    csv_path = tmp_path / "legacy.csv"
-    csv_path.write_text("header\na\n", encoding="utf-8")
+def test_update_all_runs_every_downloadable_source_in_one_thread(screens):
     seen: list[str] = []
 
     def updater(source, db_path, progress_fn):
@@ -342,7 +311,7 @@ def test_update_all_runs_every_downloadable_source_in_one_thread(screens, tmp_pa
         progress_fn(0.5, "working")
         return BuildResult(source=source, db_path=db_path, row_count=7)
 
-    screen = make_screen(screens, csv_path=str(csv_path), updater=updater)
+    screen = make_screen(screens, updater=updater)
     screen.handle_key(U_UPPER)
     screen.join(TIMEOUT)
 
@@ -351,26 +320,6 @@ def test_update_all_runs_every_downloadable_source_in_one_thread(screens, tmp_pa
         SOURCE_TAR1090,
         SOURCE_FAA,
     ]
-
-
-def test_legacy_csv_cannot_be_updated(screens, tmp_path):
-    csv_path = tmp_path / "legacy.csv"
-    csv_path.write_text("header\na\n", encoding="utf-8")
-    calls: list[str] = []
-
-    def updater(source, db_path, progress_fn):
-        calls.append(source)
-        return BuildResult(source=source, db_path=db_path, row_count=1)
-
-    screen = make_screen(screens, csv_path=str(csv_path), updater=updater)
-    screen.handle_key(DOWN)
-    screen.handle_key(DOWN)
-    assert screen.selected_spec.key == SOURCE_CSV
-
-    assert screen.update_selected() is False
-    screen.join(TIMEOUT)
-    assert calls == []
-    assert "cannot fetch it" in render(screen)
 
 
 def test_a_failing_update_surfaces_the_error_instead_of_raising(screens):

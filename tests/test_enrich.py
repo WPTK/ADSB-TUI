@@ -8,7 +8,6 @@ import pytest
 
 from adsbtui.enrich import (
     AircraftInfo,
-    CsvProvider,
     DerivedProvider,
     Enricher,
     FeedProvider,
@@ -35,16 +34,6 @@ def registry_db(tmp_path):
     db_path = str(tmp_path / "registry.db")
     build_from_tar1090(str(source), db_path)
     return db_path
-
-
-@pytest.fixture
-def owner_csv(tmp_path):
-    path = tmp_path / "master.csv"
-    path.write_text(
-        "N-NUMBER,NAME,MODE S CODE HEX\n100,LEGACY CSV OWNER,A004B3\n500,CSV ONLY OWNER,A00500\n",
-        encoding="utf-8",
-    )
-    return str(path)
 
 
 def aircraft(hex_id="a004b3", **kwargs):
@@ -92,15 +81,6 @@ class TestProvidersInIsolation:
         junk = tmp_path / "junk.db"
         junk.write_bytes(b"definitely not sqlite")
         assert SqliteProvider(str(junk)).lookup("a004b3") is None
-
-    def test_csv_provider(self, owner_csv):
-        provider = CsvProvider(owner_csv)
-        assert provider.lookup("a004b3").owner == "LEGACY CSV OWNER"
-        assert provider.lookup("A00500").owner == "CSV ONLY OWNER"
-        assert provider.lookup("3c6444") is None
-
-    def test_csv_provider_survives_a_missing_file(self, tmp_path):
-        assert CsvProvider(str(tmp_path / "gone.csv")).lookup("a004b3") is None
 
     def test_derived_provider(self):
         info = DerivedProvider().lookup("A004B3")
@@ -155,19 +135,13 @@ class TestEnricherPriority:
         assert info.country == "Germany"
         assert info.sources["country"] == "derived"
 
-    def test_database_beats_the_legacy_csv(self, registry_db, owner_csv):
-        enricher = Enricher.from_paths(db_path=registry_db, csv_path=owner_csv)
-        info = enricher.lookup("a004b3")
-
-        assert info.owner == "BENE MARY D"
-        assert info.sources["owner"] == "db"
-
-    def test_csv_fills_in_what_the_database_lacks(self, registry_db, owner_csv):
-        enricher = Enricher.from_paths(db_path=registry_db, csv_path=owner_csv)
+    def test_derived_fills_in_what_the_database_lacks(self, registry_db):
+        # A00500 is not a row in the registry database, so the lowest-priority provider is
+        # the only one with anything to say -- and it must still be consulted.
+        enricher = Enricher.from_paths(db_path=registry_db)
         info = enricher.lookup("A00500")
 
-        assert info.owner == "CSV ONLY OWNER"
-        assert info.sources["owner"] == "csv"
+        assert info.owner is None  # no provider below the database knows an owner
         # Verified against the tar1090 community registry, which independently records
         # A00500 as N100DA. The value here was previously N100CE, derived from a suffix
         # encoder that laid single letters and pairs out in the wrong order.

@@ -48,13 +48,15 @@ from adsbtui import (
     geo,
     history,
     normalize,
+    output,
     tracker,
 )
 from adsbtui import watchlist as watchlist_mod
 from adsbtui.config import Config
+from adsbtui.enrich import registry_update
 from adsbtui.model import Aircraft, AlertLevel, Snapshot
 from adsbtui.sources import Source, SourceError
-from adsbtui.ui import bars, theme
+from adsbtui.ui import bars, radar, theme
 from adsbtui.ui import columns as columns_mod
 from adsbtui.ui.screens.columns import ColumnsScreen
 from adsbtui.ui.screens.data import DataScreen
@@ -79,8 +81,17 @@ GETCH_TIMEOUT_MS = 200
 #: (1, 2, 4, 8, ... capped at cfg.source.backoff_max_s) used after a failed fetch.
 BACKOFF_BASE_S = 1.0
 
-#: Fixed rows above the aircraft table: title bar, key/legend bar, column header, divider.
-_TOP_ROWS = 4
+#: Fixed rows around the aircraft table: the status line, the column header and its
+#: divider above; the key bar below.
+_TOP_ROWS = 3
+
+#: Scope geometry. The scope only appears once the terminal is wide enough for it AND a
+#: readable table, and it is capped so a very wide terminal spends the extra width on
+#: aircraft data rather than an enormous circle.
+RADAR_MIN_TOTAL_WIDTH = 110
+RADAR_MIN_WIDTH = 24
+RADAR_MAX_WIDTH = 44
+RADAR_GAP = 2
 
 _LOGGER_NAME = "adsbtui"
 
@@ -100,6 +111,7 @@ KEYMAP: dict[str, str] = {
     "columns": "c",
     "watchlist": "w",
     "pause": "p",
+    "radar": "r",
     "units": "u",
     "radius": "+/-",
 }
@@ -253,14 +265,14 @@ class App:
         self.source = source
         self._logger = logging.getLogger(_LOGGER_NAME)
 
-        self._registry: dict[str, str] = {}
-        if cfg.registry.path:
-            try:
-                self._registry = normalize.load_owner_registry(cfg.registry.path)
-            except OSError as exc:
-                self._logger.warning("could not load registry %s: %s", cfg.registry.path, exc)
-
         self._enricher = self._build_enricher()
+
+        # --- automatic registry refresh --------------------------------------------
+        #: Set while a background download/rebuild is running, so the status line can say
+        #: so and a second refresh cannot start on top of the first.
+        self._registry_status: str | None = None
+        self._registry_thread: threading.Thread | None = None
+        self._registry_done = threading.Event()
 
         self._attrs: dict[str, int] = {}
 
@@ -310,6 +322,9 @@ class App:
         self._track_stats: dict[str, dict] = {}
 
         # --- live UI state that screens mutate -------------------------------------
+        #: The scope is on whenever the terminal can fit it; 'r' turns it off for anyone
+        #: who wants the full width for the table.
+        self._radar_on = True
         self._search_text = ""
         self._cursor = 0
         self._scroll = 0
@@ -320,10 +335,10 @@ class App:
         """Assemble the registration/type/owner lookup chain.
 
         Ordered cheapest-and-most-authoritative first: whatever the receiver itself sent,
-        then the downloaded registry database, then a legacy CSV if the user has one, then
-        purely derived facts (an N-number and a country computed from the hex alone). Every
-        provider is optional -- with no databases at all this still yields a registration
-        and country for US aircraft, which is why it is built unconditionally.
+        then the downloaded registry database, then purely derived facts (an N-number and a
+        country computed from the hex alone). Every provider is optional -- with no
+        database at all this still yields a registration and country for US aircraft, which
+        is why it is built unconditionally.
         """
         providers: list[enrich.Provider] = [enrich.FeedProvider()]
         db_path = os.path.expanduser(self.cfg.registry.db or "")
@@ -332,10 +347,63 @@ class App:
                 providers.append(enrich.SqliteProvider(db_path))
             except sqlite3.Error as exc:
                 self._logger.warning("registry database unusable (%s): %s", db_path, exc)
-        if self._registry:
-            providers.append(enrich.CsvProvider(self._registry))
         providers.append(enrich.DerivedProvider())
         return enrich.Enricher(providers)
+
+    # ------------------------------------------------------------------
+    # Automatic registry refresh
+    # ------------------------------------------------------------------
+
+    def _registry_needs_refresh(self) -> bool:
+        """True when the registry database is missing or older than registry.max_age_days.
+
+        The rule itself lives in output.registry_is_due so the TUI and the headless service
+        cannot drift apart on what "stale" means. "Missing" is the important half: a fresh
+        install has no database at all, and requiring someone to find a screen and press a
+        key before owner names work is the kind of manual step that leaves the feature
+        switched off forever.
+        """
+        return output.registry_is_due(self.cfg)
+
+    def _start_registry_refresh(self) -> None:
+        """Download and rebuild the registry on a background thread, if one is due.
+
+        Runs off the UI thread for the same reason the feed does: this is an 8 MB download
+        plus a few hundred thousand SQLite inserts, and none of it may block drawing. The
+        enricher is rebuilt on the main thread once the flag is set, since swapping it
+        underneath a running fetch would be a data race.
+        """
+        if self._registry_thread is not None and self._registry_thread.is_alive():
+            return
+        if not self._registry_needs_refresh():
+            return
+
+        db_path = os.path.expanduser(self.cfg.registry.db)
+
+        def _progress(fraction: float, message: str) -> None:
+            # registry_update calls this as (fraction, message); the percentage is what
+            # belongs in a one-line status, the message is already in the log.
+            self._registry_status = f"registry {min(max(fraction, 0.0), 1.0) * 100:.0f}%"
+
+        def _run() -> None:
+            self._registry_status = "registry updating"
+            try:
+                result = registry_update.build_from_tar1090(
+                    registry_update.TAR1090_URL, db_path, progress_fn=_progress
+                )
+            except Exception as exc:  # never let a download kill the session
+                self._logger.warning("registry update failed: %s", exc)
+                self._registry_status = "registry update failed"
+            else:
+                if result.not_modified:
+                    self._logger.info("registry already current")
+                else:
+                    self._logger.info("registry updated: %d rows", result.row_count)
+                self._registry_status = None
+                self._registry_done.set()
+
+        self._registry_thread = threading.Thread(target=_run, daemon=True)
+        self._registry_thread.start()
 
     def _enrich(self, aircraft: list[Aircraft]) -> None:
         """Fill in registration/type/owner/flags for each aircraft, in place.
@@ -366,13 +434,8 @@ class App:
                 aircraft_list: list[Aircraft] = []
                 for raw_ac in snapshot.raw_aircraft:
                     ac = normalize.parse_aircraft(raw_ac)
-                    if ac is None:
-                        continue
-                    if self._registry:
-                        name = self._registry.get(ac.hex.upper())
-                        if name:
-                            ac.owner_name = name
-                    aircraft_list.append(ac)
+                    if ac is not None:
+                        aircraft_list.append(ac)
 
                 self._enrich(aircraft_list)
 
@@ -622,12 +685,16 @@ class App:
             except curses.error:
                 color_ok = False
 
+        # Every color name theme.ROW_STYLES can use must appear here: a name that is
+        # missing silently falls back to the terminal's default foreground, which is how
+        # the scope's rings ended up uncolored the first time.
         color_map = {
             "cyan": curses.COLOR_CYAN,
             "yellow": curses.COLOR_YELLOW,
             "red": curses.COLOR_RED,
             "magenta": curses.COLOR_MAGENTA,
             "green": curses.COLOR_GREEN,
+            "blue": curses.COLOR_BLUE,
             "white": curses.COLOR_WHITE,
         }
 
@@ -671,19 +738,36 @@ class App:
             stdscr.addstr(y, x, text, attr)
 
     def _row_style_name(self, ac: Aircraft) -> str:
+        """Pick a row style: status first, altitude band as the resting state.
+
+        Anything the user needs to react to (an emergency, something overhead, a watched
+        aircraft) outranks decoration. Everything else is colored by altitude band, so an
+        ordinary screenful still carries information instead of being a wall of one color.
+        """
         if ac.alert_level == AlertLevel.EMERGENCY:
             return "emergency"
         if ac.is_military:
             return "military"
+        if ac.is_watched:
+            return "watchlist"
         if ac.alert_level == AlertLevel.OVERHEAD:
             return "overhead"
         if ac.alert_level in (AlertLevel.INBOUND, AlertLevel.OUTBOUND):
             return "inbound"
         if ac.is_stale:
             return "stale"
-        if ac.is_new:
-            return "new"
-        return "normal"
+        return theme.altitude_style(ac.altitude_ft, ac.on_ground)
+
+    def _radar_width(self, width: int) -> int:
+        """Columns to give the scope, or 0 when it is off or the terminal is too narrow.
+
+        The table needs most of the width to stay readable, so the scope only appears once
+        there is genuinely room for both -- squeezing them together would make the table
+        drop columns to pay for a scope too small to read.
+        """
+        if not self._radar_on or width < RADAR_MIN_TOTAL_WIDTH:
+            return 0
+        return min(RADAR_MAX_WIDTH, max(RADAR_MIN_WIDTH, width // 3))
 
     def _draw(
         self,
@@ -709,26 +793,42 @@ class App:
         normal_attr = self._attrs.get("normal", curses.A_NORMAL)
         header_attr = self._attrs.get("header", curses.A_BOLD)
 
-        config_path = getattr(self.cfg, "_config_path", None)
-        title = bars.title_bar_text(width, __version__, paused, display.units, config_path)
-        self._safe_addstr(stdscr, 0, 0, title, header_attr)
-
-        key_line = bars.key_bar_text(width, KEYMAP)
-        self._safe_addstr(stdscr, 1, 0, key_line, normal_attr)
+        # Row 0 is live state, the bottom row is the key hints, and everything between is
+        # the actual content. Nothing on screen spends a row on things that never change.
+        age = None if last_success_at is None else max(0.0, time.time() - last_success_at)
+        alert_count = sum(1 for ac in aircraft_list if ac.alert_level != AlertLevel.NONE)
+        status = bars.status_line_text(
+            width,
+            source_ok=last_error is None,
+            source_message=last_error,
+            last_success_age_s=age,
+            aircraft_count=len(aircraft_list),
+            alert_count=alert_count,
+            msg_rate=self._msg_rate,
+            paused=paused,
+            clock=time.strftime("%H:%M:%S"),
+            note=self._registry_status,
+        )
+        status_attr = self._attrs.get("ok" if last_error is None else "bad", header_attr)
+        self._safe_addstr(stdscr, 0, 0, status, status_attr)
 
         border_style = display.borders
         ascii_only = border_style == "ascii"
-        columns = columns_mod.layout(display.columns, width, display.owner_width)
-        widths = columns_mod.compute_widths(columns, width, display.owner_width)
+
+        radar_width = self._radar_width(width)
+        table_width = width - radar_width - (RADAR_GAP if radar_width else 0)
+
+        columns = columns_mod.layout(display.columns, table_width, display.owner_width)
+        widths = columns_mod.compute_widths(columns, table_width, display.owner_width)
 
         header_line = columns_mod.format_header(columns, widths, border_style)
-        self._safe_addstr(stdscr, 2, 0, header_line, header_attr)
+        self._safe_addstr(stdscr, 1, 0, header_line[:table_width], header_attr)
 
         divider_char = theme.glyphs(border_style)["h"] or "-"
-        self._safe_addstr(stdscr, 3, 0, divider_char * width, normal_attr)
+        self._safe_addstr(stdscr, 2, 0, divider_char * table_width, self._attrs.get("chrome", 0))
 
-        bottom_rows = 1 if display.status_bar else 0
-        table_height = max(0, height - _TOP_ROWS - bottom_rows)
+        table_top = 3
+        table_height = max(0, height - table_top - 1)
 
         # Keep the cursor inside the list and the viewport around the cursor, so the table
         # scrolls instead of silently hiding everything past the first screenful.
@@ -741,33 +841,83 @@ class App:
                 attr = self._attrs.get("selected", curses.A_REVERSE)
             else:
                 attr = self._attrs.get(self._row_style_name(ac), normal_attr)
-            self._safe_addstr(stdscr, _TOP_ROWS + i, 0, row_text, attr)
+            self._safe_addstr(stdscr, table_top + i, 0, row_text[:table_width], attr)
+
+        if radar_width:
+            self._draw_radar(
+                stdscr,
+                aircraft_list,
+                left=table_width + RADAR_GAP,
+                top=1,
+                width=radar_width,
+                height=height - 2,
+                ascii_only=ascii_only,
+            )
+
+        key_line = bars.key_bar_text(width, KEYMAP)
+        self._safe_addstr(stdscr, height - 1, 0, key_line, self._attrs.get("chrome", normal_attr))
 
         if self._screen is not None:
             self._draw_screen_overlay(stdscr, width, height)
 
-        if display.status_bar:
-            age = None if last_success_at is None else max(0.0, time.time() - last_success_at)
-            alert_count = sum(1 for ac in aircraft_list if ac.alert_level != AlertLevel.NONE)
-            status = bars.status_line_text(
-                width,
-                source_ok=last_error is None,
-                source_message=last_error,
-                last_success_age_s=age,
-                aircraft_count=len(aircraft_list),
-                alert_count=alert_count,
-                msg_rate=self._msg_rate,
-            )
-            self._safe_addstr(stdscr, height - 1, 0, status, normal_attr)
-
         stdscr.noutrefresh()
         curses.doupdate()
+
+    def _draw_radar(
+        self,
+        stdscr,
+        aircraft_list: list[Aircraft],
+        left: int,
+        top: int,
+        width: int,
+        height: int,
+        ascii_only: bool,
+    ) -> None:
+        """Draw the scope pane: a bordered box with the PPI inside and a range caption.
+
+        Cells are drawn one at a time because each carries its own style -- a ring dot, a
+        compass tick and an emergency contact land in the same row and must not share an
+        attribute.
+        """
+        if width < 8 or height < 5:
+            return
+
+        chrome = self._attrs.get("chrome", 0)
+
+        selected = self._selected_aircraft(aircraft_list)
+        # The scope can only be as tall as its width allows once the 2:1 cell aspect is
+        # applied; asking for more just pads it with blank rows and strands the caption
+        # far below the rings.
+        scope_h = min(height - 2, int(width * radar.ASPECT) + 2)
+        scope = radar.render(
+            aircraft_list,
+            width=width,
+            height=scope_h,
+            range_mi=self.cfg.filter.radius,
+            selected_hex=selected.hex if selected else None,
+            ascii_only=ascii_only,
+        )
+
+        for row_index, line in enumerate(scope.lines):
+            styles = scope.styles[row_index]
+            for col_index, char in enumerate(line):
+                if char == " ":
+                    continue
+                attr = self._attrs.get(styles[col_index], 0)
+                self._safe_addstr(stdscr, top + row_index, left + col_index, char, attr)
+
+        caption = radar.range_label(self.cfg.filter.radius, self._distance_unit_label())
+        self._safe_addstr(stdscr, top + scope.height, left, caption[:width].center(width), chrome)
+
+    def _distance_unit_label(self) -> str:
+        return {"imperial": "mi", "metric": "km", "aviation": "nm"}.get(
+            self.cfg.display.units, "mi"
+        )
 
     def _page_size(self, stdscr) -> int:
         """Rows of table visible right now, for PageUp/PageDown."""
         height, _ = stdscr.getmaxyx()
-        bottom_rows = 1 if self.cfg.display.status_bar else 0
-        return max(1, height - _TOP_ROWS - bottom_rows)
+        return max(1, height - 4)
 
     def _clamp_view(self, total: int, table_height: int) -> None:
         """Keep the cursor within the list and the scroll window around the cursor."""
@@ -795,9 +945,15 @@ class App:
         if screen is None:
             return
 
-        box_w = max(20, min(width - 4, 76))
+        # 96 rather than 76: the help screen's column glossary and the settings screen's
+        # help text are both written as sentences, and clipping them mid-word on a wide
+        # terminal wasted room that was sitting right there.
+        box_w = max(20, min(width - 4, 96))
         inner_w = box_w - 4
-        lines = screen.render_lines(inner_w, max(1, height - 8))
+        # The box itself can hold height-4 body rows (two borders, and box_h below adds two
+        # rows of padding), so asking a screen for height-8 threw away four usable rows and
+        # made long screens drop content that would have fitted.
+        lines = screen.render_lines(inner_w, max(1, height - 6))
         box_h = min(height - 2, len(lines) + 4)
         top = max(0, (height - box_h) // 2)
         left = max(0, (width - box_w) // 2)
@@ -863,7 +1019,6 @@ class App:
         elif name == "data":
             self._screen = DataScreen(
                 self.cfg.registry.db,
-                csv_path=self.cfg.registry.path,
                 stale_after_days=self.cfg.registry.max_age_days,
             )
         self._screen_name = name if self._screen is not None else None
@@ -930,12 +1085,6 @@ class App:
         self.cfg = new_cfg
 
         # Settings that feed long-lived objects have to be re-read, not just stored.
-        self._registry = {}
-        if self.cfg.registry.path:
-            try:
-                self._registry = normalize.load_owner_registry(self.cfg.registry.path)
-            except OSError as exc:
-                self._logger.warning("could not load registry: %s", exc)
         self._enricher = self._build_enricher()
         self._dispatcher = dispatch.Dispatcher(
             self.cfg.alerts, bell_fn=lambda _event: self._bell_pending.set()
@@ -1008,6 +1157,13 @@ class App:
                 self._draw(stdscr, aircraft_list, last_error, last_success_at, paused)
                 dirty = False
 
+            # A finished registry download changes what the enricher can resolve, so it
+            # is swapped in here, on the main thread, rather than under a running fetch.
+            if self._registry_done.is_set():
+                self._registry_done.clear()
+                self._enricher = self._build_enricher()
+                dirty = True
+
             # The bell fires here rather than on the fetch thread: curses.beep() is a
             # curses call, and only this thread may make one.
             if self._bell_pending.is_set():
@@ -1054,6 +1210,8 @@ class App:
                 self._open_screen("watchlist", aircraft_list)
             elif key in (ord("p"), ord("P")):
                 paused = not paused
+            elif key in (ord("r"), ord("R")):
+                self._radar_on = not self._radar_on
             elif key == ord("u"):
                 current = self.cfg.display.units
                 index = _UNIT_SYSTEMS.index(current) if current in _UNIT_SYSTEMS else 0
@@ -1091,6 +1249,7 @@ class App:
             self._attrs = self._build_attrs()
 
             fetch_thread.start()
+            self._start_registry_refresh()
             return self._event_loop(stdscr, stop_event, out_queue)
         except KeyboardInterrupt:
             return 0

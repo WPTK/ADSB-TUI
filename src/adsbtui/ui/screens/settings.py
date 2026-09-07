@@ -222,12 +222,12 @@ _LABELS_AND_HELP: dict[str, tuple[str, str]] = {
         "SQLite cache of aircraft registrations built from tar1090-db or the FAA registry.",
     ),
     "registry.max_age_days": (
-        "Warn when older than",
-        "Days before the Data screen flags a downloaded database as stale.",
+        "Refresh after (days)",
+        "How old the registry may get before it is downloaded again. 1 = daily.",
     ),
-    "registry.path": (
-        "Registry CSV (legacy)",
-        "Optional bring-your-own FAA CSV. Prefer downloading via the Data screen (F8) instead.",
+    "registry.auto_update": (
+        "Auto-update",
+        "Download a fresh registry in the background when it is missing or stale.",
     ),
     "history.db": (
         "History database",
