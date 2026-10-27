@@ -343,6 +343,23 @@ def test_a_failing_update_surfaces_the_error_instead_of_raising(screens):
     assert screen.is_updating is False
 
 
+def test_a_long_error_wraps_so_the_status_stays_visible(screens):
+    # Issue #7: clipped to one line, this read "...ReleasableAircraft.zip: HTT".
+    def updater(source, db_path, progress_fn):
+        raise RegistryError(
+            "could not download https://registry.faa.gov/database/ReleasableAircraft.zip:"
+            " HTTP 403 Forbidden"
+        )
+
+    screen = make_screen(screens, updater=updater)
+    screen.handle_key(U_LOWER)
+    screen.join(TIMEOUT)
+
+    lines = screen.render_lines(60, 40)
+    assert all(len(line) <= 60 for line in lines)
+    assert "Forbidden" in "\n".join(lines)
+
+
 def test_a_failing_update_does_not_stop_the_remaining_sources(screens):
     def updater(source, db_path, progress_fn):
         if source == SOURCE_TAR1090:
