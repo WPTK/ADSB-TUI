@@ -49,10 +49,9 @@ STARTUP_TIMEOUT_S = 30.0
 #: Upper bound on how long a clean shutdown may take after the quit key is sent. Generous
 #: for the same reason as STARTUP_TIMEOUT_S: a shared/loaded CI runner (macOS runners in
 #: particular have shown wide variance) can take much longer than a shutdown that is
-#: normally near-instant (a 200ms getch() poll plus a 2s fetch-thread join budget). Raised
-#: from 45s after a completely unrelated (docs-only) PR still hit "TIMEOUT-still-running"
-#: on two different macOS jobs in one run, each on a different test -- not a hang tied to
-#: any particular key sequence, just a runner slow enough on that run to blow the budget.
+#: normally near-instant (a 200ms getch() poll plus a 2s fetch-thread join budget). Some
+#: intermittent "TIMEOUT-still-running" failures blamed on slow runners were a reaping race
+#: in _run_tui rather than a slow shutdown; see the comment there.
 EXIT_TIMEOUT_S = 90.0
 
 
@@ -122,18 +121,21 @@ def _run_tui(cols: int, rows: int, keys: bytes) -> tuple[str, int | str]:
     text = out.decode("utf-8", "replace")
     if not ready:
         text += f"\n[test harness: {READY_MARKER!r} never appeared within {STARTUP_TIMEOUT_S}s]"
+    # EOF on the pty means the child closed its terminal, not that it has finished exiting:
+    # there is a window between the two. A single WNOHANG check here used to land in that
+    # window and SIGKILL a child that was already on its way out, reporting
+    # "TIMEOUT-still-running" seconds into a run. Poll until the exit deadline instead.
+    reap_deadline = max(deadline, time.time() + 5.0)
     try:
-        os.kill(pid, 0)
-        reaped, status = os.waitpid(pid, os.WNOHANG)
-        if reaped == 0:
-            os.kill(pid, signal.SIGKILL)
-            os.waitpid(pid, 0)
-            return text, "TIMEOUT-still-running"
-    except ProcessLookupError:
-        return text, 0
-    try:
-        _, status = os.waitpid(pid, 0)
-        return text, os.WEXITSTATUS(status)
+        while True:
+            reaped, status = os.waitpid(pid, os.WNOHANG)
+            if reaped:
+                return text, os.WEXITSTATUS(status)
+            if time.time() >= reap_deadline:
+                os.kill(pid, signal.SIGKILL)
+                os.waitpid(pid, 0)
+                return text, "TIMEOUT-still-running"
+            time.sleep(0.05)
     except ChildProcessError:
         return text, 0
 
