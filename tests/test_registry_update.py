@@ -436,6 +436,32 @@ class TestDownload:
             download("https://example.invalid/x.gz", str(tmp_path / "file.gz"))
 
 
+class TestDownloadForbiddenRetry:
+    def test_403_is_retried_with_a_browser_user_agent(self, tmp_path, monkeypatch):
+        forbidden = urllib.error.HTTPError(
+            "https://example.invalid/x.zip", 403, "Forbidden", {}, None
+        )
+        opener = FakeOpener(forbidden, FakeResponse(b"zip"))
+        monkeypatch.setattr(urllib.request, "urlopen", opener)
+        dest = str(tmp_path / "file.zip")
+
+        result = download("https://example.invalid/x.zip", dest)
+
+        assert result.size == 3
+        assert len(opener.requests) == 2
+        assert opener.requests[0].get_header("User-agent").startswith("adsb-tui/")
+        assert opener.requests[1].get_header("User-agent").startswith("Mozilla/")
+
+    def test_a_second_403_is_reported(self, tmp_path, monkeypatch):
+        forbidden = urllib.error.HTTPError(
+            "https://example.invalid/x.zip", 403, "Forbidden", {}, None
+        )
+        monkeypatch.setattr(urllib.request, "urlopen", FakeOpener(forbidden, forbidden))
+
+        with pytest.raises(RegistryError, match="403"):
+            download("https://example.invalid/x.zip", str(tmp_path / "file.zip"))
+
+
 class TestBuildFromUrl:
     def test_downloads_and_records_the_url(self, tmp_path, monkeypatch):
         body = gzip.compress(TAR1090_SAMPLE.encode())

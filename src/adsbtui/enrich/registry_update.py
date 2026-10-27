@@ -59,6 +59,12 @@ SOURCE_FAA = "faa"
 MAX_DOWNLOAD_BYTES = 256 * 1024 * 1024
 
 _USER_AGENT = f"adsb-tui/{__version__} (+https://github.com/wptk/adsb-tui)"
+#: registry.faa.gov sits behind a CDN that answers 403 to non-browser User-Agents, so a 403
+#: is retried once with this one.
+_BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0 Safari/537.36"
+)
 _CHUNK = 64 * 1024
 _BATCH = 5000
 
@@ -168,8 +174,30 @@ def download(
     the end, so dest is never a partial file. A declared or actual body larger than
     max_bytes is refused. Every network and filesystem failure becomes a RegistryError.
     """
+    try:
+        return _download_once(
+            url, dest, progress_fn, timeout, max_bytes, etag, last_modified, _USER_AGENT
+        )
+    except RegistryError as exc:
+        if "HTTP 403" not in str(exc):
+            raise
+    return _download_once(
+        url, dest, progress_fn, timeout, max_bytes, etag, last_modified, _BROWSER_USER_AGENT
+    )
+
+
+def _download_once(
+    url: str,
+    dest: str,
+    progress_fn: ProgressFn | None,
+    timeout: float,
+    max_bytes: int,
+    etag: str | None,
+    last_modified: str | None,
+    user_agent: str,
+) -> DownloadResult:
     headers = {
-        "User-Agent": _USER_AGENT,
+        "User-Agent": user_agent,
         # Ask for the bytes as-is: the sources are already compressed, and an identity
         # encoding keeps Content-Length meaningful for the progress bar and the size cap.
         "Accept-Encoding": "identity",

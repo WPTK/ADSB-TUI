@@ -5,6 +5,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **The FAA registry download no longer fails with HTTP 403.** `registry.faa.gov` rejects
+  non-browser User-Agents; a 403 is now retried once with a browser-style one (#7).
+
 ### Added
 - **A radar scope.** Aircraft are plotted around you with range rings, N/E/S/W ticks and a
   direction arrow per contact, so the shape of the traffic is visible instead of implied by a
