@@ -17,6 +17,17 @@ pip install -e .
 ```
 
 - Windows needs curses: `pip install -e ".[windows]"`
+- **Raspberry Pi OS** (and other Debian-based systems) refuses `pip install` outside a virtual
+  environment ("externally-managed-environment"). Use pipx instead:
+
+  ```bash
+  sudo apt install pipx && pipx ensurepath   # once; open a new shell afterwards
+  pipx install --editable .
+  ```
+
+  `--editable` makes a later `git pull` take effect. A pipx install made without it is a copy
+  that a pull never touches; convert it with `pipx install --force --editable .`. Either way,
+  restart adsbtui (and the kiosk service, if you use it) after updating.
 - Tests/lint: `pip install -e ".[dev]"`, then `pytest -q` and `ruff check src tests`
 
 ---
