@@ -487,6 +487,22 @@ class TestBuildFromUrl:
 
         assert opener.requests[1].get_header("If-none-match") is None
 
+    def test_faa_download_presents_a_browser_user_agent(self, tmp_path, monkeypatch):
+        # registry.faa.gov 403s non-browser User-Agents (issue #7); tar1090 keeps ours.
+        with open(write_faa_zip(tmp_path / "faa.zip"), "rb") as handle:
+            faa_body = handle.read()
+        tar_body = gzip.compress(TAR1090_SAMPLE.encode())
+        opener = FakeOpener(FakeResponse(faa_body), FakeResponse(tar_body))
+        monkeypatch.setattr(urllib.request, "urlopen", opener)
+        db_path = str(tmp_path / "registry.db")
+
+        build_from_faa_zip("https://example.invalid/ReleasableAircraft.zip", db_path)
+        build_from_tar1090("https://example.invalid/aircraft.csv.gz", db_path)
+
+        faa_ua, tar_ua = (r.get_header("User-agent") for r in opener.requests)
+        assert faa_ua.startswith("Mozilla/5.0")
+        assert tar_ua.startswith("adsb-tui/")
+
     def test_a_failed_download_leaves_no_scratch_directory(self, tmp_path, monkeypatch):
         opener = FakeOpener(urllib.error.URLError("boom"))
         monkeypatch.setattr(urllib.request, "urlopen", opener)

@@ -109,6 +109,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   around left the docs describing a workflow nobody should follow.
 
 ### Fixed
+- **The FAA registry download works again** (#7). registry.faa.gov answers 403 to any client
+  it does not take for a browser, so `F8` → FAA always failed; that one request now sends a
+  browser User-Agent. tar1090-db and everything else still identify as adsb-tui.
 - `--once`/`--watch`/`--batch` previously ignored `registry.path` and every `[filter]` setting
   beyond radius, and never computed elevation angle -- so OWNER was always N/A outside the TUI
   and JSON/CSV output disagreed with what the curses screen showed for the same feed.
