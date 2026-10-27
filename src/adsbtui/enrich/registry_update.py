@@ -59,6 +59,13 @@ SOURCE_FAA = "faa"
 MAX_DOWNLOAD_BYTES = 256 * 1024 * 1024
 
 _USER_AGENT = f"adsb-tui/{__version__} (+https://github.com/wptk/adsb-tui)"
+#: registry.faa.gov sits behind an Akamai rule that answers 403 to any User-Agent it does
+#: not recognize as a browser, ours included (issue #7). The file is public domain and the
+#: FAA publishes it for bulk download, so the FAA request alone presents a browser UA.
+_FAA_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/130.0 Safari/537.36"
+)
 _CHUNK = 64 * 1024
 _BATCH = 5000
 
@@ -156,6 +163,7 @@ def download(
     max_bytes: int = MAX_DOWNLOAD_BYTES,
     etag: str | None = None,
     last_modified: str | None = None,
+    user_agent: str = _USER_AGENT,
 ) -> DownloadResult:
     """Fetch url into dest, optionally conditionally.
 
@@ -169,7 +177,7 @@ def download(
     max_bytes is refused. Every network and filesystem failure becomes a RegistryError.
     """
     headers = {
-        "User-Agent": _USER_AGENT,
+        "User-Agent": user_agent,
         # Ask for the bytes as-is: the sources are already compressed, and an identity
         # encoding keeps Content-Length meaningful for the progress bar and the size cap.
         "Accept-Encoding": "identity",
@@ -600,6 +608,7 @@ def build_from_faa_zip(
         timeout=timeout,
         max_bytes=max_bytes,
         force=force,
+        user_agent=_FAA_USER_AGENT,
     )
 
 
@@ -618,6 +627,7 @@ def _build(
     timeout: float,
     max_bytes: int,
     force: bool,
+    user_agent: str = _USER_AGENT,
 ) -> BuildResult:
     """Fetch if needed, parse, and atomically install one source's rows."""
     previous = read_meta(db_path).get(source)
@@ -639,6 +649,7 @@ def _build(
                 max_bytes=max_bytes,
                 etag=None if force or previous is None else previous.etag,
                 last_modified=None if force or previous is None else previous.last_modified,
+                user_agent=user_agent,
             )
             if result.not_modified:
                 return BuildResult(
