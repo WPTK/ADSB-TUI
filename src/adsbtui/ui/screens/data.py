@@ -34,7 +34,9 @@ downloadable one in turn, Esc closes.
 
 from __future__ import annotations
 
+import logging
 import os
+import textwrap
 import threading
 import time
 from collections.abc import Callable, Sequence
@@ -54,6 +56,8 @@ from adsbtui.enrich.registry_update import (
     read_meta,
 )
 from adsbtui.ui.widgets import ListPicker, ProgressBar
+
+log = logging.getLogger("adsbtui")
 
 _ESCAPE_KEY = 27
 _UPDATE_KEY = ord("u")
@@ -377,6 +381,7 @@ class DataScreen:
             # program down with it: this is running on a thread nobody is catching for.
             detail = str(exc) or exc.__class__.__name__
             message = f"{label}: {detail}"
+            log.warning("registry update failed: %s", message)
             with self._lock:
                 self._error = message
                 self._message = f"{label}: failed"
@@ -460,7 +465,9 @@ class DataScreen:
                 lines.append(_clip(bar, width))
 
             if error:
-                lines.append(_clip(f"Error: {error}", width))
+                # Wrapped, not clipped: the end of the message is usually the HTTP status,
+                # and clipping it is what left issue #7 reading "...ReleasableAircraft.zip: HTT".
+                lines.extend(textwrap.wrap(f"Error: {error}", width, break_long_words=True) or [""])
             if notice:
                 lines.append(_clip(notice, width))
 
