@@ -461,3 +461,31 @@ class TestSummaryStepIsInert:
         assert screen.step == STEP_SUMMARY
         screen.handle_key(ord(" "))
         assert screen.result().display.units == "imperial"
+
+
+# ----------------------------------------------------------------------------------
+# Seeding from the environment and command line (A53)
+# ----------------------------------------------------------------------------------
+
+
+def test_a_seed_prefills_the_wizard_answers():
+    screen = SetupScreen(
+        seed={
+            "source.url": "http://seeded.example/aircraft.json",
+            "home.lat": "37.7749",
+            "home.lon": -122.4194,
+            "display.units": "metric",
+            "filter.radius": "40",
+        }
+    )
+    assert screen._host_field.value == "http://seeded.example/aircraft.json"
+    assert screen._lat_field.value == pytest.approx(37.7749)
+    assert screen._lon_field.value == pytest.approx(-122.4194)
+    assert screen._units_select.value == "metric"
+    assert screen._radius_field.value == pytest.approx(40.0)
+
+
+def test_a_bad_seed_value_falls_back_to_the_default():
+    screen = SetupScreen(seed={"home.lat": "north", "display.units": "cubits"})
+    assert screen._lat_field.value is None
+    assert screen._units_select.value == "imperial"

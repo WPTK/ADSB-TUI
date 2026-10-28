@@ -14,7 +14,7 @@ import tomllib
 import pytest
 
 from adsbtui import firstrun
-from adsbtui.config import Config
+from adsbtui.config import Config, build_argparser
 
 
 class _Stream:
@@ -157,3 +157,21 @@ def test_scripted_run_skips_the_wizard_entirely():
         is None
     )
     assert calls == []
+
+
+def test_the_wizard_is_seeded_from_the_environment_and_command_line(monkeypatch):
+    monkeypatch.setenv("ADSBTUI_SOURCE_URL", "http://env.example/aircraft.json")
+    seen = {}
+
+    def fake_run_setup(screen=None, seed=None):
+        seen.update(seed or {})
+
+    monkeypatch.setattr(firstrun, "run_setup", fake_run_setup)
+    firstrun.first_run(
+        build_argparser().parse_args(["--lat", "12.5"]),
+        save_fn=lambda cfg: None,
+        stdin=_Stream(True),
+        stdout=_Stream(True),
+    )
+    assert seen["source.url"] == "http://env.example/aircraft.json"
+    assert seen["home.lat"] == 12.5

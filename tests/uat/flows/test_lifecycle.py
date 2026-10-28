@@ -44,6 +44,30 @@ def test_wizard_saves_where_the_loader_looks(spawn, feed, sandbox):
     assert (sandbox / "xdg-config" / "adsbtui" / "config.toml").exists()
 
 
+def test_wizard_is_prefilled_from_the_environment(spawn, feed, sandbox):
+    env = {"ADSBTUI_HOME_LAT": "37.7749", "ADSBTUI_HOME_LON": "-122.4194"}
+    term = spawn(100, 34, feed_args=False, wait_ready=False, env=env)
+    term.wait_for("Setup 1/4")
+    press(term, feed.url, "f5")
+    term.wait_for("responded")
+    press(term, "enter")
+    term.wait_for("Setup 2/4")
+    assert "37.7749" in term.text and "-122.4194" in term.text  # already in the fields
+    press(term, "esc")
+    assert term.wait_exit() == 2
+    assert not list(sandbox.rglob("config.toml"))  # nothing is saved that the user did not enter
+
+
+def test_env_that_supplies_a_source_skips_the_wizard(spawn, feed):
+    env = {
+        "ADSBTUI_SOURCE_URL": feed.url,
+        "ADSBTUI_HOME_LAT": "37.7749",
+        "ADSBTUI_HOME_LON": "-122.4194",
+    }
+    term = spawn(100, 34, feed_args=False, env=env)
+    assert "Setup" not in term.text
+
+
 def test_ctrl_c_in_the_wizard_exits_cleanly(spawn):
     term = spawn(feed_args=False, wait_ready=False)
     term.wait_for("Setup 1/4")

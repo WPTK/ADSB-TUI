@@ -14,15 +14,20 @@ from __future__ import annotations
 
 import contextlib
 import curses
+import functools
 import logging
 import os
 import sys
+from collections.abc import Mapping
+from typing import Any
 
 from . import config_write
 from .config import (
     Config,
     ConfigError,
+    cli_overrides,
     default_config_path,
+    env_overrides,
     find_config_path,
     load_toml,
     validate,
@@ -92,12 +97,14 @@ def _drive(stdscr, screen: SetupScreen) -> bool:
             return bool(getattr(screen, "applied", False))
 
 
-def run_setup(screen: SetupScreen | None = None) -> Config | None:
+def run_setup(
+    screen: SetupScreen | None = None, seed: Mapping[str, Any] | None = None
+) -> Config | None:
     """Run the wizard in curses. Returns the finished Config, or None if it was cancelled.
 
     Only ever called once should_offer_setup() has agreed the run is interactive.
     """
-    screen = SetupScreen() if screen is None else screen
+    screen = SetupScreen(seed=seed) if screen is None else screen
     try:
         finished = curses.wrapper(_drive, screen)
     except curses.error as exc:
@@ -134,7 +141,10 @@ def first_run(
 
     # Injectable so tests can drive the whole flow without a terminal; production uses the
     # real curses wizard and the real writer.
-    setup_fn = run_setup if setup_fn is None else setup_fn
+    if setup_fn is None:
+        # What the environment and command line already say pre-fills the wizard (A53).
+        seed = {**env_overrides(dict(os.environ)), **cli_overrides(args)}
+        setup_fn = functools.partial(run_setup, seed=seed)
     save_fn = save_new_config if save_fn is None else save_fn
 
     print("No configuration found. Starting setup -- press Esc at any point to cancel.")
