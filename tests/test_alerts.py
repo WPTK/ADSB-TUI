@@ -67,6 +67,14 @@ class TestGradeOverhead:
         ac = make_aircraft(distance_mi=3.0)
         assert grade_default(ac, proximity_mi=5.0) == AlertLevel.OVERHEAD
 
+    def test_on_the_ground_within_radius_is_nearby_not_overhead(self):
+        ac = make_aircraft(distance_mi=0.5, on_ground=True)
+        assert grade_default(ac, proximity_mi=5.0) == AlertLevel.NEARBY
+
+    def test_on_the_ground_with_an_emergency_squawk_is_still_an_emergency(self):
+        ac = make_aircraft(distance_mi=0.5, on_ground=True, squawk="7700")
+        assert grade_default(ac) == AlertLevel.EMERGENCY
+
     def test_exactly_at_proximity_radius_is_overhead(self):
         ac = make_aircraft(distance_mi=5.0)
         assert grade_default(ac, proximity_mi=5.0) == AlertLevel.OVERHEAD

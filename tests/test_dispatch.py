@@ -84,6 +84,10 @@ class TestBuildEvent:
         ac = make_aircraft()
         assert build_event(ac, AlertLevel.NONE, AlertLevel.OVERHEAD, DEFAULT_EVENTS) is None
 
+    def test_nearby_never_produces_an_event(self):
+        ac = make_aircraft()
+        assert build_event(ac, AlertLevel.NEARBY, AlertLevel.NONE, DEFAULT_EVENTS) is None
+
     def test_overhead_transition_maps_to_proximity(self):
         ac = make_aircraft()
         event = build_event(ac, AlertLevel.OVERHEAD, AlertLevel.NONE, DEFAULT_EVENTS)

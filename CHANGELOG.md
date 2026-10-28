@@ -109,6 +109,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   around left the docs describing a workflow nobody should follow.
 
 ### Fixed
+- **Aircraft on the ground are no longer graded OVERHEAD.** Taxiing traffic within
+  `filter.proximity` used to ring the bell, fire the webhook and run the alert command, so
+  living near an airport meant constant alerts. They now show `NEAR` in the ALERT column and
+  never alert; an emergency squawk on the ground still does.
 - **The FAA registry download works again** (#7). registry.faa.gov answers 403 to any client
   it does not take for a browser, so `F8` → FAA always failed; that one request now sends a
   browser User-Agent. tar1090-db and everything else still identify as adsb-tui.

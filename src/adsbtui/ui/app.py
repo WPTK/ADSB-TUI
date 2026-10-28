@@ -796,7 +796,9 @@ class App:
         # Row 0 is live state, the bottom row is the key hints, and everything between is
         # the actual content. Nothing on screen spends a row on things that never change.
         age = None if last_success_at is None else max(0.0, time.time() - last_success_at)
-        alert_count = sum(1 for ac in aircraft_list if ac.alert_level != AlertLevel.NONE)
+        alert_count = sum(
+            1 for ac in aircraft_list if ac.alert_level not in (AlertLevel.NONE, AlertLevel.NEARBY)
+        )
         status = bars.status_line_text(
             width,
             source_ok=last_error is None,
