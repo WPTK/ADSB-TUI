@@ -20,7 +20,7 @@ Old files that still set a retired key (`display.theme`, `display.density`,
 |---|---|---|
 | `url` | `""` (required) | `aircraft.json`: URL, bare path, or `file://` |
 | `refresh_s` | `5.0` | Seconds between polls |
-| `timeout_s` | `5.0` | Timeout for each network read, not for the whole fetch (a feed that trickles bytes can outlast it) |
+| `timeout_s` | `5.0` | Wall-clock limit for one HTTP fetch, from request to the last byte of the body |
 | `stale_s` † | `30.0` | Max age before the *source* counts as stale |
 | `backoff_max_s` | `30.0` | Cap on fetch-retry backoff |
 | `max_bytes` | `8000000` | Reject a larger response |

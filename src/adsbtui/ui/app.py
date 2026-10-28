@@ -507,7 +507,7 @@ class App:
                 self._publish(out_queue, (None, [], str(exc)))
                 stop_event.wait(backoff)
                 backoff = min(backoff * 2, self.cfg.source.backoff_max_s)
-            except Exception as exc:  # pragma: no cover - defensive, never crash the thread
+            except Exception as exc:  # a bug must show up as a banner, not kill the thread
                 self._logger.exception("unexpected error in fetch loop: %s", exc)
                 self._publish(out_queue, (None, [], str(exc)))
                 stop_event.wait(backoff)

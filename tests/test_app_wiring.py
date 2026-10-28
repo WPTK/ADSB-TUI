@@ -495,3 +495,31 @@ def test_data_screen_failure_leaves_the_enricher_alone():
     ]
     app._close_screen()
     assert app._enricher is before
+
+
+def test_a_bug_in_the_fetch_loop_becomes_an_error_banner_not_a_dead_thread(monkeypatch):
+    """The catch-all in _fetch_loop is reachable (it used to hide behind `pragma: no cover`)."""
+    import queue
+    import threading
+
+    from adsbtui import normalize
+
+    class Source:
+        def fetch(self, timeout):
+            return {"now": 1.0, "aircraft": [{"hex": "abc123"}]}
+
+    def boom(raw):
+        raise RuntimeError("parser exploded")
+
+    monkeypatch.setattr(normalize, "parse_aircraft", boom)
+    app = App(_config(), Source())
+    stop, out = threading.Event(), queue.Queue()
+    thread = threading.Thread(target=app._fetch_loop, args=(stop, out), daemon=True)
+    thread.start()
+    try:
+        snapshot, aircraft, error = out.get(timeout=5)
+    finally:
+        stop.set()
+        thread.join(timeout=5)
+    assert snapshot is None and aircraft == []
+    assert "parser exploded" in error

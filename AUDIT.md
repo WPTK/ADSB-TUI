@@ -52,7 +52,7 @@ milestones land: `Open`, `Fixed (M#)`, or `Won't fix: reason`.
 | F31 | README 163-165 | "Non-US"/"type needs paid API"/"military-LADD-PIA" limitations are solvable for free | D (docs) | B22-B25 | Fixed (M2, M8): the receiver's own enrichment fields are read first; the in-app Data screen (`F8`) also downloads and builds a local SQLite registry from the FAA bulk registry and tar1090-db on request, covering non-US aircraft and type without a paid API. |
 | F32 | README 155 | Claims unique-aircraft logging; nothing but errors is logged | R | B29, B33 | Fixed (M9): each closed track is now summarised into a SQLite sightings table, and the README describes what is actually recorded. |
 | F33 | 157-162 | Untrusted JSON strings reach `addstr` unfiltered: NUL raises uncaught `ValueError` | R | B06 | Fixed (M1); NUL in hex/reg/type/squawk re-fixed at the boundary (Meeting 1 A01, A02), guarded by `tests/test_injection.py` |
-| F34 | 58 | No response size cap or wall-clock bound on the fetch | R | B03, B04 | Partly fixed (M1): the size cap holds, there is no wall-clock bound, see A05 |
+| F34 | 58 | No response size cap or wall-clock bound on the fetch | R | B03, B04 | Fixed (M1); the wall-clock bound landed in Meeting 1 PR 3 (A05), guarded by `tests/test_sources.py` |
 
 ## Low / Info
 
