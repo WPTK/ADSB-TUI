@@ -168,7 +168,9 @@ def format_status(status: SourceStatus) -> str:
     else:
         detail = "not downloaded"
         age = ""
-    return f"{status.spec.label:<11} {detail:<16} {age:<20} {status.spec.license}"
+    # Column widths are what fits an 80-column terminal (a 72-column box body, less the
+    # two-character cursor) with the longest licence text; wider ones clipped it.
+    return f"{status.spec.label:<10} {detail:<14} {age:<19} {status.spec.license}"
 
 
 def default_updater(source: str, db_path: str, progress_fn: ProgressFn) -> BuildResult:

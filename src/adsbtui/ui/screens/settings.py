@@ -41,7 +41,15 @@ from dataclasses import dataclass, fields, is_dataclass
 from typing import Any
 
 from adsbtui.config import Config, ConfigError, validate
-from adsbtui.ui.widgets import Form, NumberField, Select, Tabs, TextField, Toggle
+from adsbtui.ui.widgets import (
+    Form,
+    NumberField,
+    Select,
+    Tabs,
+    TextField,
+    Toggle,
+    wrap_text,
+)
 
 _CANCEL_KEYS = frozenset({27})
 _APPLY_KEYS = frozenset({10, 13, curses.KEY_ENTER, curses.KEY_F10})
@@ -532,7 +540,7 @@ class SettingsScreen:
             if i == form.focus_index:
                 focus_line = len(body)
             body.append(field_lines[i] if i < len(field_lines) else "")
-            body.append(_clip("      " + spec.help, width) if spec.help else "")
+            body.extend(wrap_text(spec.help, width, "      ") if spec.help else [""])
         return body, focus_line
 
     def render_lines(self, width: int, height: int) -> list[str]:
@@ -543,7 +551,7 @@ class SettingsScreen:
         tail = [""]
         if self.error:
             tail.append(_clip(f"! {self.error}", width))
-        tail.append(_clip(_FOOTER_TEXT, width))
+        tail.extend(wrap_text(_FOOTER_TEXT, width))
 
         capacity = height - len(head) - len(tail)
         if capacity < 1:

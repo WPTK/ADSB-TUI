@@ -970,7 +970,7 @@ class App:
         body_attr = self._attrs.get("normal", curses.A_NORMAL)
 
         title = f" {screen.title} "[: max(0, box_w - 4)]
-        top_line = tl + h + title + h * max(0, box_w - 3 - len(title) - 1) + tr
+        top_line = tl + h + title + h * max(0, box_w - 3 - len(title)) + tr
         self._safe_addstr(stdscr, top, left, top_line[:box_w], border_attr)
 
         for i in range(box_h - 2):
