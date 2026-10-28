@@ -35,6 +35,7 @@ from adsbtui.enrich.derived import (
     registration_from_hex,
 )
 from adsbtui.model import Aircraft
+from adsbtui.normalize import sanitize
 
 #: Provider names in descending priority, as accepted by Enricher.from_paths().
 DEFAULT_ORDER: tuple[str, ...] = ("feed", "db", "derived")
@@ -308,19 +309,21 @@ class Enricher:
         """
         info = self.enrich(aircraft)
 
-        if aircraft.registration is None and info.registration:
-            aircraft.registration = info.registration
-        if aircraft.type_code is None and info.type_code:
-            aircraft.type_code = info.type_code
-        if aircraft.type_desc is None and info.type_desc:
-            aircraft.type_desc = info.type_desc
-        if aircraft.year is None and info.year:
-            aircraft.year = info.year
-        if info.owner:
+        # The registry is downloaded data, so it crosses the same boundary the feed does.
+        if aircraft.registration is None:
+            aircraft.registration = sanitize(info.registration, 12)
+        if aircraft.type_code is None:
+            aircraft.type_code = sanitize(info.type_code, 8)
+        if aircraft.type_desc is None:
+            aircraft.type_desc = sanitize(info.type_desc, 64)
+        if aircraft.year is None:
+            aircraft.year = sanitize(info.year, 4)
+        owner = sanitize(info.owner, 64)
+        if owner:
             if aircraft.owner_operator is None:
-                aircraft.owner_operator = info.owner
+                aircraft.owner_operator = owner
             if aircraft.owner_name is None:
-                aircraft.owner_name = info.owner
+                aircraft.owner_name = owner
         if not aircraft.db_flags and info.db_flags:
             aircraft.db_flags = info.db_flags
         if info.is_military:

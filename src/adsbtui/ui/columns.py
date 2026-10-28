@@ -25,6 +25,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from adsbtui import textwidth
 from adsbtui.alerts import classify_trend, decode_category, decode_db_flags, trend_glyph
 from adsbtui.geo import compass_point
 from adsbtui.model import Aircraft, AlertLevel
@@ -162,14 +163,14 @@ _ALERT_TAGS: dict[AlertLevel, str] = {
 
 
 def sanitize_cell(value: Any, width: int, align: str = "left") -> str:
-    """Clean a cell value and force it to exactly width characters.
+    """Clean a cell value and force it to exactly width terminal cells.
 
     Reuses normalize.sanitize() to strip NUL/control characters (and non-string input)
     before sizing, then truncates or pads with spaces so the result is always exactly
-    width characters long -- never wider, which is what fixes the original overflow
-    bug where a long or malformed field could corrupt the rest of the line. Treats every
-    character as width 1; full East-Asian wide-character support is out of scope, the
-    goal here is only "never crash and never overflow".
+    width cells wide -- never wider, which is what fixes the original overflow bug where a
+    long or malformed field could corrupt the rest of the line. Width is measured in
+    terminal cells (textwidth), so a CJK callsign takes two per character instead of
+    wrapping the row.
 
     Never raises: a non-string value, None, or an empty/whitespace-only string all become
     an empty cell rather than an exception.
@@ -179,9 +180,7 @@ def sanitize_cell(value: Any, width: int, align: str = "left") -> str:
     cleaned = sanitize(value) if isinstance(value, str) else None
     if cleaned is None:
         cleaned = ""
-    if len(cleaned) > width:
-        cleaned = cleaned[:width]
-    return cleaned.rjust(width) if align == "right" else cleaned.ljust(width)
+    return textwidth.rjust(cleaned, width) if align == "right" else textwidth.ljust(cleaned, width)
 
 
 def _format_short_duration(seconds: float | None) -> str:
@@ -248,7 +247,7 @@ def _cell_dist(ac: Aircraft, unit_system: str, ascii_only: bool) -> str:
 def _cell_brg(ac: Aircraft, unit_system: str, ascii_only: bool) -> str:
     if ac.bearing_deg is None:
         return "N/A"
-    return f"{compass_point(ac.bearing_deg)} {ac.bearing_deg:03.0f}"
+    return f"{compass_point(ac.bearing_deg)} {round(ac.bearing_deg) % 360:03d}"
 
 
 def _cell_cpa(ac: Aircraft, unit_system: str, ascii_only: bool) -> str:

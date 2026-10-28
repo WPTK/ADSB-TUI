@@ -39,7 +39,7 @@ from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from typing import Any, TextIO
 
-from adsbtui import alerts, dispatch, enrich, geo, history, normalize, tracker
+from adsbtui import alerts, dispatch, enrich, geo, history, normalize, textwidth, tracker
 from adsbtui import watchlist as watchlist_mod
 from adsbtui.config import Config
 from adsbtui.enrich import registry_update
@@ -140,7 +140,7 @@ _TABLE_COLUMNS: list[tuple[str, str, int]] = [
 
 
 def _table_cell(value: str, width: int) -> str:
-    return value[:width].ljust(width)
+    return textwidth.ljust(value, width)
 
 
 def render_table(aircraft_list: list[Aircraft], unit_system: str) -> str:
@@ -183,7 +183,7 @@ def render_csv(aircraft_list: list[Aircraft], unit_system: str) -> str:
         fieldnames = list(aircraft_to_dict(aircraft_list[0], unit_system).keys())
     else:
         fieldnames = list(_DICT_FIELDS)
-    writer = csv.DictWriter(buf, fieldnames=fieldnames)
+    writer = csv.DictWriter(buf, fieldnames=fieldnames, lineterminator="\n")
     writer.writeheader()
     for ac in aircraft_list:
         writer.writerow(aircraft_to_dict(ac, unit_system))

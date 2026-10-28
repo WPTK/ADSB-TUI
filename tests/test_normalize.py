@@ -253,16 +253,14 @@ def test_parse_aircraft_missing_db_flags_defaults_to_zero():
     assert ac.is_military is False
 
 
-def test_parse_aircraft_extra_holds_shallow_copy_of_raw():
-    raw = {"hex": "f00001", "some_future_field": "value"}
-    ac = parse_aircraft(raw)
+def test_parse_aircraft_does_not_carry_unmodelled_raw_fields():
+    ac = parse_aircraft({"hex": "f00001", "some_future_field": "value"})
     assert ac is not None
-    assert ac.extra.get("some_future_field") == "value"
-    assert ac.extra.get("hex") == "f00001"
+    assert not hasattr(ac, "extra")
 
 
 def test_parse_aircraft_emergency_variants():
-    assert parse_aircraft({"hex": "a1", "emergency": "none"}).emergency is None
-    assert parse_aircraft({"hex": "a2", "emergency": ""}).emergency is None
-    assert parse_aircraft({"hex": "a3"}).emergency is None
-    assert parse_aircraft({"hex": "a4", "emergency": "general"}).emergency == "general"
+    assert parse_aircraft({"hex": "a10000", "emergency": "none"}).emergency is None
+    assert parse_aircraft({"hex": "a20000", "emergency": ""}).emergency is None
+    assert parse_aircraft({"hex": "a30000"}).emergency is None
+    assert parse_aircraft({"hex": "a40000", "emergency": "general"}).emergency == "general"

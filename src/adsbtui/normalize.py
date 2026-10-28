@@ -9,6 +9,8 @@ character.
 
 from __future__ import annotations
 
+import math
+import re
 from typing import Any
 
 from adsbtui.model import Aircraft, Snapshot
@@ -36,18 +38,64 @@ def sanitize(s: Any, max_len: int | None = None) -> str | None:
 
 
 def _num(v: Any) -> float | None:
-    """Coerce int/float (excluding bool) to float; everything else becomes None."""
+    """Coerce int/float (excluding bool) to a finite float; everything else becomes None.
+
+    JSON `1e999` and Python's `Infinity`/`NaN` parse to non-finite floats that would sail
+    through the geometry and formatting code and blow up there, so they stop here.
+    """
     if isinstance(v, bool):
         return None
     if isinstance(v, (int, float)):
-        return float(v)
+        try:
+            f = float(v)
+        except OverflowError:
+            return None
+        return f if math.isfinite(f) else None
     return None
 
 
+def _ranged(v: Any, lo: float, hi: float) -> float | None:
+    """_num(v) if it lies in [lo, hi], else None."""
+    n = _num(v)
+    return n if n is not None and lo <= n <= hi else None
+
+
 def _int(v: Any) -> int | None:
-    """Coerce int/float (excluding bool) to int; everything else becomes None."""
+    """Coerce int/float (excluding bool) to a finite int; everything else becomes None."""
     n = _num(v)
     return None if n is None else int(n)
+
+
+# Physical limits. A value outside them is a corrupt or hostile record, not an extreme
+# aircraft, so the field becomes None (unknown) and the rest of the record survives.
+_ALT_FT = (-2_000.0, 100_000.0)
+_RATE_FPM = (-100_000.0, 100_000.0)
+_GS_KT = (0.0, 3_000.0)
+_RSSI_DB = (-200.0, 50.0)
+_MAX_AGE_S = 1e9
+
+_HEX_RE = re.compile(r"~?[0-9a-f]{6}")
+_SQUAWK_RE = re.compile(r"[0-7]{4}")
+_CATEGORY_RE = re.compile(r"[A-D][0-7]")
+_SOURCE_TYPE_RE = re.compile(r"[a-z0-9_]{1,16}")
+_EMERGENCY = frozenset(
+    {"general", "lifeguard", "minfuel", "nordo", "unlawful", "downed", "reserved"}
+)
+
+
+def _match(pattern: re.Pattern[str], v: Any, *, lower: bool = False) -> str | None:
+    """v if it is a string that matches pattern in full, else None. Never raises."""
+    if not isinstance(v, str):
+        return None
+    if lower:
+        v = v.lower()
+    return v if pattern.fullmatch(v) else None
+
+
+def _angle(v: Any) -> float | None:
+    """A compass angle in degrees, folded into [0, 360), or None if out of range."""
+    n = _ranged(v, 0.0, 360.0)
+    return None if n is None else n % 360.0
 
 
 def parse_snapshot(raw: dict, fetched_at: float) -> Snapshot:
@@ -61,7 +109,7 @@ def parse_snapshot(raw: dict, fetched_at: float) -> Snapshot:
     if now is None:
         now = fetched_at
 
-    messages = _int(raw.get("messages"))
+    messages = _int(_ranged(raw.get("messages"), 0.0, 1e15))
 
     raw_aircraft = raw.get("aircraft", [])
     if not isinstance(raw_aircraft, list):
@@ -78,81 +126,65 @@ def parse_snapshot(raw: dict, fetched_at: float) -> Snapshot:
 def parse_aircraft(raw: dict) -> Aircraft | None:
     """Parse one raw aircraft.json entry into an Aircraft, or None on any error.
 
-    This never raises: a single malformed record (missing keys, wrong types) is dropped
-    by returning None instead of blanking the whole table, which was the original bug.
+    This is the trust boundary: every field is validated here, so nothing downstream (the
+    curses UI, the table and CSV output, the history database, webhooks) has to treat an
+    Aircraft as hostile. Strings are matched against their wire format or stripped of
+    control characters and capped; numbers must be finite and physically plausible. A bad
+    field becomes None; only a missing or malformed hex drops the record.
+
+    This never raises: a single malformed record is dropped by returning None instead of
+    blanking the whole table, which was the original bug.
     """
     try:
-        hex_val = raw.get("hex")
-        if not isinstance(hex_val, str) or not hex_val:
+        hex_val = _match(_HEX_RE, raw.get("hex"), lower=True)
+        if hex_val is None:
             return None
 
-        is_icao = not hex_val.startswith("~")
-
-        flight = sanitize(raw.get("flight"), 10)
-
-        squawk_raw = raw.get("squawk")
-        squawk = squawk_raw if isinstance(squawk_raw, str) and squawk_raw else None
-
         emergency_raw = raw.get("emergency")
-        emergency = (
-            emergency_raw
-            if isinstance(emergency_raw, str) and emergency_raw and emergency_raw != "none"
-            else None
-        )
-
-        category = raw.get("category") or None
+        emergency = emergency_raw.lower() if isinstance(emergency_raw, str) else None
+        if emergency not in _EMERGENCY:
+            emergency = None
 
         alt_baro_raw = raw.get("alt_baro")
-        if alt_baro_raw == "ground":
-            on_ground = True
-            altitude_ft = None
-        else:
-            num = _num(alt_baro_raw)
-            on_ground = False
-            altitude_ft = num
+        on_ground = alt_baro_raw == "ground"
+        altitude_ft = None if on_ground else _ranged(alt_baro_raw, *_ALT_FT)
 
-        registration = raw.get("r")
-        registration = registration if isinstance(registration, str) and registration else None
-
-        type_code = raw.get("t")
-        type_code = type_code if isinstance(type_code, str) and type_code else None
-
-        year = raw.get("year")
-        year = year if isinstance(year, str) and year else None
-
-        db_flags = _int(raw.get("dbFlags")) or 0
+        # A position is both coordinates or neither: half of one is a corrupt record.
+        lat = _ranged(raw.get("lat"), -90.0, 90.0)
+        lon = _ranged(raw.get("lon"), -180.0, 180.0)
+        if lat is None or lon is None:
+            lat = lon = None
 
         return Aircraft(
             hex=hex_val,
-            is_icao=is_icao,
-            flight=flight,
-            squawk=squawk,
+            is_icao=not hex_val.startswith("~"),
+            flight=sanitize(raw.get("flight"), 10),
+            squawk=_match(_SQUAWK_RE, raw.get("squawk")),
             emergency=emergency,
-            category=category,
+            category=_match(_CATEGORY_RE, raw.get("category")),
             altitude_ft=altitude_ft,
             on_ground=on_ground,
-            geom_altitude_ft=_num(raw.get("alt_geom")),
-            baro_rate_fpm=_num(raw.get("baro_rate")),
-            geom_rate_fpm=_num(raw.get("geom_rate")),
-            ground_speed_kt=_num(raw.get("gs")),
-            track_deg=_num(raw.get("track")),
-            true_heading_deg=_num(raw.get("true_heading")),
-            mag_heading_deg=_num(raw.get("mag_heading")),
-            lat=_num(raw.get("lat")),
-            lon=_num(raw.get("lon")),
-            seen_pos_s=_num(raw.get("seen_pos")),
-            seen_s=_num(raw.get("seen")),
-            source_type=raw.get("type") if isinstance(raw.get("type"), str) else None,
-            rssi=_num(raw.get("rssi")),
-            messages=_int(raw.get("messages")),
-            registration=registration,
-            type_code=type_code,
-            type_desc=sanitize(raw.get("desc")),
-            owner_operator=sanitize(raw.get("ownOp")),
-            year=year,
-            db_flags=db_flags,
-            nav_altitude_mcp=_num(raw.get("nav_altitude_mcp")),
-            extra=dict(raw),
+            geom_altitude_ft=_ranged(raw.get("alt_geom"), *_ALT_FT),
+            baro_rate_fpm=_ranged(raw.get("baro_rate"), *_RATE_FPM),
+            geom_rate_fpm=_ranged(raw.get("geom_rate"), *_RATE_FPM),
+            ground_speed_kt=_ranged(raw.get("gs"), *_GS_KT),
+            track_deg=_angle(raw.get("track")),
+            true_heading_deg=_angle(raw.get("true_heading")),
+            mag_heading_deg=_angle(raw.get("mag_heading")),
+            lat=lat,
+            lon=lon,
+            seen_pos_s=_ranged(raw.get("seen_pos"), 0.0, _MAX_AGE_S),
+            seen_s=_ranged(raw.get("seen"), 0.0, _MAX_AGE_S),
+            source_type=_match(_SOURCE_TYPE_RE, raw.get("type")),
+            rssi=_ranged(raw.get("rssi"), *_RSSI_DB),
+            messages=_int(_ranged(raw.get("messages"), 0.0, 1e15)),
+            registration=sanitize(raw.get("r"), 12),
+            type_code=sanitize(raw.get("t"), 8),
+            type_desc=sanitize(raw.get("desc"), 64),
+            owner_operator=sanitize(raw.get("ownOp"), 64),
+            year=sanitize(raw.get("year"), 4),
+            db_flags=_int(_ranged(raw.get("dbFlags"), 0.0, 255.0)) or 0,
+            nav_altitude_mcp=_ranged(raw.get("nav_altitude_mcp"), *_ALT_FT),
         )
     except Exception:
         return None
