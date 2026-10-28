@@ -47,12 +47,22 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
-          python -m pytest -q
+          # addopts deselects the pty UAT flows; a release runs all of them, as CI's uat job does.
+          python -m pytest -m "uat or not uat" -n auto -q
 
       - name: Build
         run: |
           python -m pip install build
           python -m build
+
+      - name: The built wheel runs from a clean environment
+        # Installs only the wheel into a fresh venv, away from the checkout, and runs the
+        # health check on the fixture: catches a package that tests only because of the source tree.
+        run: |
+          python -m venv "$RUNNER_TEMP/smoke"
+          "$RUNNER_TEMP/smoke/bin/python" -m pip install dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/smoke/bin/adsbtui" --check --url "$GITHUB_WORKSPACE/tests/fixtures/aircraft.json" --lat 37.7749 --lon -122.4194
 
       - name: The built version matches the tag
         env:

@@ -35,7 +35,7 @@ milestones land: `Open`, `Fixed (M#)`, or `Won't fix: reason`.
 
 | ID | Line | Finding | Ver | Fix | Status |
 |---|---|---|---|---|---|
-| F17 | 63-70 | `seen_pos` ignored: stale positions used for distance/alert | D (docs) | B10 | Partly fixed (M2): display only; stale and lost aircraft are still graded and dispatched, see A07 |
+| F17 | 63-70 | `seen_pos` ignored: stale positions used for distance/alert | D (docs) | B10 | Fixed (M2, #20): stale and lost aircraft are no longer graded or dispatched (an emergency still is); guarded by `tests/test_alerts.py::test_stale_or_lost_inside_proximity_is_none` and `test_a_stale_emergency_still_grades_emergency` |
 | F18 | 98, 130 | "Last Update" shows wall clock; naive `datetime` interval can go negative on a clock step | R | B04, B05 | Fixed (M3) |
 | F19 | 139 | Alert is a current-distance check, not the overflight prediction the README describes | R | B13 | Fixed (M6) |
 | F20 | 76 | readsb enrichment fields (`r`, `t`, `desc`, `ownOp`, `year`, `dbFlags`) discarded | D (docs) | B11 | Fixed (M2) |
@@ -61,7 +61,7 @@ milestones land: `Open`, `Fixed (M#)`, or `Won't fix: reason`.
 | F35 | 115 | First fetch waits a full refresh interval; empty table at launch | R | B04 | Fixed (M3) |
 | F36 | 138, 155 | Per-frame sort/format and O(n*m) alert membership check | R | B04 | Fixed (M3) |
 | F37 | 111, 178 | `nodelay`+`sleep` instead of `stdscr.timeout()` | R | B04 | Fixed (M3) |
-| F38 | 135 | Poll period drifts because timestamp is taken after the fetch | R | B04 | Open: the wait still follows the work, see A24 |
+| F38 | 135 | Poll period drifts because timestamp is taken after the fetch | R | B04 | Fixed (#19): the loop waits against a fixed deadline, so the period is `refresh_s`; guarded by `tests/test_pipeline.py::test_the_poll_period_is_refresh_s_not_fetch_time_plus_refresh_s` |
 | F39 | 113 | CSV loads after curses init with a blank screen | D | B03 | Fixed (M3) |
 | F40 | 52 | `get_direction`: banker's rounding at exact boundaries; unreachable 17th entry | D | B01 | Fixed (M2) |
 | F41 | 70, 84 | `0 < distance` excludes exact-overhead aircraft; `.0f` renders 359.5 as 360 | D | B01 | Fixed (M2); re-fixed (Meeting 1 A09), guarded by `tests/test_textwidth.py` |
