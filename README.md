@@ -3,7 +3,7 @@
 A terminal UI for watching aircraft near you, fed by your own `readsb` or `dump1090-fa` receiver.
 Python 3.11+, no third-party dependencies.
 
-<!-- TODO: add a screenshot or terminal recording here -->
+![adsbtui showing live traffic around SFO: the aircraft table with altitude-coloured rows and the radar scope](docs/screenshots/main.png)
 
 - Radar scope and a sortable table with distance, bearing and closest approach from your location
 - Registration, type and owner filled in from a registry that downloads and refreshes itself
@@ -58,6 +58,8 @@ a local file such as `/run/readsb/aircraft.json`.
 | `+` / `-` | Grow / shrink the radius |
 | `q` | Quit |
 
+![The detail pane for one aircraft, with closest approach and squawk](docs/screenshots/detail.png)
+
 ## Without the UI
 
 ```bash
@@ -90,3 +92,4 @@ pytest -q && ruff check src tests
 
 [CC0 1.0](LICENSE): public domain, no warranty. Downloaded registry data has its own terms,
 shown in the app: the FAA extract is public domain, tar1090-db is non-commercial use only.
+Screenshot traffic is a live snapshot from [adsb.lol](https://adsb.lol) (ODbL).
