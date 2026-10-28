@@ -24,7 +24,7 @@ Keys marked **†** are stored, validated, and editable, but don't affect behavi
 | Key | Default | Meaning |
 |---|---|---|
 | `radius` | `15.0` mi | Drop aircraft farther than this |
-| `proximity` | `5.0` mi | `OVERHEAD` alert threshold |
+| `proximity` | `5.0` mi | `OVERHEAD` alert threshold (aircraft on the ground show `NEAR` and never alert) |
 | `hide_ground` | `false` | Hide aircraft on the ground |
 | `include_nonicao` | `true` | Include `~`-prefixed TIS-B/MLAT addresses |
 | `min_alt_ft` / `max_alt_ft` | `0` / `60000` | Altitude band |
@@ -105,7 +105,7 @@ quiet_hours = "22:00-07:00"
 | OWNER | Registered owner or operator |
 | FLAGS | `MIL` military, `PIA` private address, `LADD` limited display, plus size class |
 | AGE | Time since its position last updated |
-| ALERT | `OVHD` overhead, `INBND` closing on you, `EMERG` emergency squawk |
+| ALERT | `OVHD` overhead, `NEAR` on the ground nearby (never alerts), `INBND` closing on you, `EMERG` emergency squawk |
 | ICAO | The 24-bit address that uniquely identifies the airframe |
 
 Headers shorten (`ALTITUDE` to `ALT`) on a narrow terminal, and the same table is in the help

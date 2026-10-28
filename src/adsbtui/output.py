@@ -882,7 +882,7 @@ def run_batch(
                 for h in sorted(current_hexes):
                     ac = current[h]
                     level = ac.alert_level
-                    if level == AlertLevel.NONE:
+                    if level in (AlertLevel.NONE, AlertLevel.NEARBY):
                         continue
                     if previous_levels.get(h, AlertLevel.NONE) == level:
                         continue

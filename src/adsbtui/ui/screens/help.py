@@ -40,7 +40,10 @@ COLUMN_GLOSSARY: tuple[tuple[str, str], ...] = (
     ("OWNER", "Registered owner or operator"),
     ("FLAGS", "MIL military, PIA private address, LADD limited display, plus size class"),
     ("AGE", "Time since its position last updated"),
-    ("ALERT", "OVHD overhead, INBND closing on you, EMERG emergency squawk"),
+    (
+        "ALERT",
+        "OVHD overhead, NEAR ground, INBND closing, EMERG squawk",
+    ),
     ("ICAO", "The 24-bit address that uniquely identifies the airframe"),
 )
 

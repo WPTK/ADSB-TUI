@@ -13,6 +13,7 @@ from enum import StrEnum
 
 class AlertLevel(StrEnum):
     NONE = "none"
+    NEARBY = "nearby"  # on the ground within the proximity radius: shown, never alerted
     PASSING = "passing"
     OUTBOUND = "outbound"
     INBOUND = "inbound"

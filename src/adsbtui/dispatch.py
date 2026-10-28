@@ -48,7 +48,8 @@ from adsbtui.model import Aircraft, AlertLevel
 #: AlertLevel -> the [alerts].events name that governs it. OVERHEAD/PASSING/OUTBOUND are
 #: all "proximity" -- they're all forms of "this aircraft is/was physically close" -- while
 #: INBOUND (a projected close approach) is its own "cpa" event and EMERGENCY is its own
-#: "emergency" event. AlertLevel.NONE is deliberately absent: it never produces an event.
+#: "emergency" event. AlertLevel.NONE and NEARBY are deliberately absent: they never
+#: produce an event.
 _EVENT_NAMES_BY_LEVEL = {
     AlertLevel.OVERHEAD: "proximity",
     AlertLevel.PASSING: "proximity",

@@ -158,6 +158,7 @@ _ALERT_TAGS: dict[AlertLevel, str] = {
     # truncated "OVERH"/"INBOU" reads as a rendering bug rather than a status.
     AlertLevel.OUTBOUND: "OUTBD",
     AlertLevel.INBOUND: "INBND",
+    AlertLevel.NEARBY: "NEAR",
     AlertLevel.OVERHEAD: "OVHD",
     AlertLevel.EMERGENCY: "EMERG",
 }

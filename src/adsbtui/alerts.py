@@ -78,7 +78,7 @@ def grade(
 
     Priority order:
       1. EMERGENCY -- squawking one of the watched codes, or reporting an emergency state.
-      2. OVERHEAD  -- currently within the proximity radius.
+      2. OVERHEAD  -- currently within the proximity radius (NEARBY if on the ground).
       3. INBOUND   -- not close yet, but its current track/speed will bring it within the
                       CPA distance inside the CPA horizon, and it's moving fast enough for
                       that projection to be meaningful.
@@ -93,9 +93,11 @@ def grade(
         if aircraft.emergency is not None:
             return AlertLevel.EMERGENCY
 
-    # 2. OVERHEAD: currently inside the proximity radius.
+    # 2. OVERHEAD: currently inside the proximity radius. An aircraft on the ground is not
+    # overhead of anything; at an airport every taxiing aircraft would otherwise ring the
+    # bell. It is graded NEARBY instead, which is displayed but never dispatched.
     if aircraft.distance_mi is not None and aircraft.distance_mi <= proximity_mi:
-        return AlertLevel.OVERHEAD
+        return AlertLevel.NEARBY if aircraft.on_ground else AlertLevel.OVERHEAD
 
     # 3. INBOUND: projected to close within cpa_distance_mi inside cpa_horizon_s, moving
     # fast enough (cpa_min_gs_kt) that the projection isn't just ground-track noise from an

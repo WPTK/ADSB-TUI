@@ -109,6 +109,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   around left the docs describing a workflow nobody should follow.
 
 ### Fixed
+- **Aircraft on the ground are no longer graded OVERHEAD.** Taxiing traffic within
+  `filter.proximity` used to ring the bell, fire the webhook and run the alert command, so
+  living near an airport meant constant alerts. They now show `NEAR` in the ALERT column and
+  never alert; an emergency squawk on the ground still does.
 - **Dialog frames were one column short** on the top edge, so the corner sat left of the side
   borders. Settings, filter and watchlist hints and the settings tab row no longer cut text
   mid-word on an 80-column terminal: hints wrap, and the tab row scrolls to keep the active
