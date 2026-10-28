@@ -60,10 +60,12 @@ def test_data_screen_reports_an_empty_registry(spawn):
     term.wait_for("UAL123")
     for opener in ("D", "f8"):
         press(term, opener)
-        term.wait_for("Aircraft registry sources")
-        assert "not downloaded" in term.text
+        term.wait_for(
+            lambda t: "Aircraft registry sources" in t.text and "not downloaded" in t.text
+        )
         press(term, "esc")
         term.wait_for("Aircraft registry sources", gone=True)
+        term.pump(0.3)  # let the Esc settle before the next escape sequence (A44)
 
 
 def test_manual_update_from_a_fake_registry(spawn):
