@@ -200,9 +200,20 @@ class Term:
                 break
         return int(self.proc.returncode)
 
-    def close(self) -> None:
+    def close(self, grace: float = 3.0) -> None:
+        """Stop the child, giving it `grace` seconds to exit on its own before SIGKILL.
+
+        SIGINT is the same graceful path as Ctrl-C (`App.run` catches KeyboardInterrupt), and it
+        works whatever screen is open. A child that is killed never writes its coverage data
+        (A43), so every test that does not end with `q` used to undercount the app.
+        """
         if self.proc.poll() is None:
-            self.signal(signal.SIGKILL)
+            self.signal(signal.SIGINT)
+            deadline = time.monotonic() + grace
+            while self.proc.poll() is None and time.monotonic() < deadline:
+                self.pump(0.05)
+            if self.proc.poll() is None:
+                self.signal(signal.SIGKILL)
         with contextlib.suppress(Exception):
             self.proc.wait(timeout=5)
         with contextlib.suppress(OSError):
