@@ -66,7 +66,10 @@ def _parse_args_quietly(argv: list[str] | None):
 def _terminal_can_draw() -> bool:
     """False when TERM names a terminal without cursor addressing (TERM=dumb): curses would
     start and paint a blank screen. An unset or unknown TERM is left to curses, which
-    already refuses it with its own message."""
+    already refuses it with its own message. Windows has no terminfo (PDCurses answers None
+    for every capability), so the check cannot say anything there."""
+    if sys.platform == "win32":
+        return True
     try:
         curses.setupterm()
         return curses.tigetstr("cup") is not None

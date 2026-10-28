@@ -66,7 +66,9 @@ def initial_bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> f
     x = math.sin(dlambda) * math.cos(phi2)
     y = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(dlambda)
     theta = math.atan2(x, y)
-    return math.degrees(theta) % 360.0
+    bearing = math.degrees(theta) % 360.0
+    # A tiny negative angle makes `% 360.0` round up to exactly 360.0, which is north again.
+    return 0.0 if bearing >= 360.0 else bearing
 
 
 def elevation_angle_deg(
