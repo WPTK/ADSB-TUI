@@ -163,6 +163,15 @@ class Config:
     # Populated by load_config(); not part of the TOML/env/CLI schema itself.
     _args: argparse.Namespace | None = field(default=None, repr=False, compare=False)
     _config_path: str | None = field(default=None, repr=False, compare=False)
+    #: The TOML file's own contents as loaded (section -> key -> value), before env and CLI
+    #: were layered on. Saving writes this plus the keys the user edited, so a one-off
+    #: --url or a secret in an env var never becomes permanent.
+    _file_layer: dict[str, dict[str, Any]] = field(default_factory=dict, repr=False, compare=False)
+
+
+#: The config file format version, written as a top-level `schema` key. A file claiming a
+#: newer one is refused rather than half-understood.
+CONFIG_SCHEMA = 1
 
 
 #: Keys that older config files may still set but that no longer do anything. They are
@@ -198,6 +207,14 @@ _SECTIONS: dict[str, type] = {
 # --------------------------------------------------------------------------------------
 
 
+def default_config_path() -> str:
+    """Where a config file is read from and written to when none is named:
+    $XDG_CONFIG_HOME/adsbtui/config.toml, or ~/.config/adsbtui/config.toml. The one place
+    this is decided, so load, first-run setup and Settings save cannot disagree."""
+    xdg_home = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return str(Path(xdg_home) / "adsbtui" / "config.toml")
+
+
 def find_config_path(explicit: str | None = None) -> str | None:
     """Resolve which TOML config file to use, or None if none is found.
 
@@ -215,12 +232,8 @@ def find_config_path(explicit: str | None = None) -> str | None:
     if env_path:
         return env_path
 
-    xdg_home = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
-    xdg_candidate = Path(xdg_home) / "adsbtui" / "config.toml"
-    if xdg_candidate.is_file():
-        return str(xdg_candidate)
-
-    return None
+    default = default_config_path()
+    return default if Path(default).is_file() else None
 
 
 def load_toml(path: str | None) -> dict[str, Any]:
@@ -325,6 +338,13 @@ def build_config(
     section_values: dict[str, dict[str, Any]] = {name: {} for name in _SECTIONS}
 
     for section_name, section_body in toml_dict.items():
+        if section_name == "schema":
+            if not isinstance(section_body, int) or section_body > CONFIG_SCHEMA:
+                raise ConfigError(
+                    f"config file schema {section_body!r} is newer than this adsbtui "
+                    f"understands (schema {CONFIG_SCHEMA}); upgrade adsbtui"
+                )
+            continue
         if section_name not in _SECTIONS:
             raise ConfigError(f"unknown config section {section_name!r} in TOML file")
         if not isinstance(section_body, dict):
@@ -369,6 +389,37 @@ def build_config(
     cfg = Config(**sections)
     validate(cfg, allow_null_home=allow_null_home)
     return cfg
+
+
+def changed_keys(old: Config, new: Config) -> set[tuple[str, str]]:
+    """The (section, key) pairs whose value differs between two Configs: what an edit
+    in the Settings screen actually touched."""
+    changed: set[tuple[str, str]] = set()
+    for section_name, section_cls in _SECTIONS.items():
+        before, after = getattr(old, section_name), getattr(new, section_name)
+        for f in fields(section_cls):
+            if getattr(before, f.name) != getattr(after, f.name):
+                changed.add((section_name, f.name))
+    return changed
+
+
+def layer_for_save(
+    file_layer: dict[str, dict[str, Any]], cfg: Config, edited: set[tuple[str, str]]
+) -> dict[str, dict[str, Any]]:
+    """What to write back to the config file: the file's own values plus the edited keys.
+
+    Env and CLI values that were never edited stay out of the file; retired keys are
+    dropped (the next save is when they go).
+    """
+    layer: dict[str, dict[str, Any]] = {}
+    for section_name, body in file_layer.items():
+        if section_name in _SECTIONS and isinstance(body, dict):
+            kept = {k: v for k, v in body.items() if (section_name, k) not in RETIRED_KEYS}
+            if kept:
+                layer[section_name] = kept
+    for section_name, key in edited:
+        layer.setdefault(section_name, {})[key] = getattr(getattr(cfg, section_name), key)
+    return layer
 
 
 # --------------------------------------------------------------------------------------
@@ -570,4 +621,5 @@ def load_config(argv: list[str] | None = None) -> Config:
     cfg = build_config(toml_dict, env=env_dict, cli=cli_dict)
     cfg._args = args
     cfg._config_path = config_path
+    cfg._file_layer = {k: dict(v) for k, v in toml_dict.items() if isinstance(v, dict)}
     return cfg

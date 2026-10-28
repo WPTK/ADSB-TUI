@@ -73,7 +73,9 @@ def make_config() -> Config:
 
 
 def round_trip(cfg: Config) -> dict:
-    return tomllib.loads(dump_config_str(cfg))
+    parsed = tomllib.loads(dump_config_str(cfg))
+    assert parsed.pop("schema") == 1
+    return parsed
 
 
 class TestStructure:
@@ -253,3 +255,20 @@ class TestDumpConfigFile:
         target = tmp_path / "config.toml"
         dump_config(Config(), str(target))
         assert target.is_file()
+
+
+class TestLayer:
+    def test_a_layer_writes_only_its_own_keys_and_round_trips(self, tmp_path) -> None:
+        from adsbtui.config_write import dump_layer
+
+        target = tmp_path / "c.toml"
+        dump_layer({"filter": {"radius": 12.5}, "source": {"url": "http://x"}}, target)
+        parsed = tomllib.loads(target.read_text("utf-8"))
+        assert parsed == {"schema": 1, "source": {"url": "http://x"}, "filter": {"radius": 12.5}}
+
+    def test_an_empty_layer_is_just_the_schema(self, tmp_path) -> None:
+        from adsbtui.config_write import dump_layer
+
+        target = tmp_path / "c.toml"
+        dump_layer({}, target)
+        assert tomllib.loads(target.read_text("utf-8")) == {"schema": 1}

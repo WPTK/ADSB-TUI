@@ -352,3 +352,45 @@ def test_a_bug_in_the_fetch_loop_becomes_an_error_banner_not_a_dead_thread(monke
         thread.join(timeout=5)
     assert snapshot is None and aircraft == []
     assert "parser exploded" in error
+
+
+def _save_settings(app, edit):
+    app._open_screen("settings", [])
+    edited = app._screen.result()
+    edit(edited)
+    app._screen.result = lambda: edited
+    app._screen.applied = True
+    app._screen.save_requested = True
+    app._close_screen()
+
+
+def test_a_failed_settings_save_is_shown_in_the_status_line(tmp_path):
+    blocker = tmp_path / "file"
+    blocker.write_text("x", "utf-8")
+    app = _app()
+    app.cfg._config_path = str(blocker / "config.toml")  # parent is a file: unwritable
+    _save_settings(app, lambda c: setattr(c.filter, "radius", 23.0))
+    assert "could not save settings" in (app._current_note() or "")
+    assert app.cfg.filter.radius == 23.0  # applied for the session anyway
+
+
+def test_a_successful_settings_save_says_so(tmp_path):
+    app = _app()
+    app.cfg._config_path = str(tmp_path / "config.toml")
+    _save_settings(app, lambda c: setattr(c.filter, "radius", 23.0))
+    assert app._current_note() == "settings saved"
+
+
+def test_settings_save_writes_only_the_file_layer_and_the_edit(tmp_path):
+    import tomllib
+
+    target = tmp_path / "config.toml"
+    target.write_text('[source]\nurl = "http://file/aircraft.json"\n', "utf-8")
+    app = _app()  # its source.url is a different, command-line-style value
+    app.cfg._config_path = str(target)
+    app.cfg._file_layer = {"source": {"url": "http://file/aircraft.json"}}
+    _save_settings(app, lambda c: setattr(c.display, "units", "metric"))
+    written = tomllib.loads(target.read_text("utf-8"))
+    assert written["source"] == {"url": "http://file/aircraft.json"}
+    assert written["display"] == {"units": "metric"}
+    assert "home" not in written

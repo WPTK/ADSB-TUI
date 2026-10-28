@@ -50,7 +50,7 @@ from adsbtui import (
     pipeline,
 )
 from adsbtui import watchlist as watchlist_mod
-from adsbtui.config import Config
+from adsbtui.config import Config, changed_keys, default_config_path, layer_for_save
 from adsbtui.enrich import registry_update
 from adsbtui.model import Aircraft, AlertLevel, Snapshot
 from adsbtui.sources import Source, SourceError
@@ -296,6 +296,9 @@ class App:
         self._radar_on = True
         self._search_text = ""
         self._feed_stale = False
+        #: (section, key) pairs edited in Settings this session; saved with the file layer.
+        self._edited: set[tuple[str, str]] = set()
+        self._flash_text: tuple[str, float] | None = None
         self._cursor = 0
         self._scroll = 0
         self._screen = None
@@ -590,7 +593,7 @@ class App:
             msg_rate=self._msg_rate,
             paused=paused,
             clock=time.strftime("%H:%M:%S"),
-            note=self._registry_status,
+            note=self._current_note(),
             feed_stale=self._feed_stale,
         )
         bad = last_error is not None or self._feed_stale
@@ -866,6 +869,8 @@ class App:
         # Carry over the bookkeeping attributes the screen does not own.
         new_cfg._args = self.cfg._args
         new_cfg._config_path = self.cfg._config_path
+        new_cfg._file_layer = self.cfg._file_layer
+        self._edited |= changed_keys(self.cfg, new_cfg)
         self.cfg = new_cfg
         self._pipeline.cfg = new_cfg
 
@@ -874,14 +879,32 @@ class App:
         self._dispatcher = self._build_dispatcher()
 
         if getattr(screen, "save_requested", False):
-            default_path = os.path.expanduser("~/.config/adsbtui/config.toml")
-            path = self.cfg._config_path or default_path
+            path = self.cfg._config_path or default_config_path()
+            layer = layer_for_save(self.cfg._file_layer, self.cfg, self._edited)
             try:
-                config_write.dump_config(self.cfg, path)
-                self.cfg._config_path = path
-                self._logger.info("configuration saved to %s", path)
+                config_write.dump_layer(layer, path)
             except OSError as exc:
                 self._logger.warning("could not save configuration to %s: %s", path, exc)
+                self._flash(f"could not save settings: {exc.strerror or exc}")
+            else:
+                self.cfg._config_path = path
+                self.cfg._file_layer = layer
+                self._edited.clear()
+                self._logger.info("configuration saved to %s", path)
+                self._flash("settings saved")
+
+    def _current_note(self) -> str | None:
+        """The status-line note: a recent flash message, else the registry job's progress."""
+        if self._flash_text is not None:
+            text, until = self._flash_text
+            if time.monotonic() < until:
+                return text
+            self._flash_text = None
+        return self._registry_status
+
+    def _flash(self, text: str, seconds: float = 6.0) -> None:
+        """Show a short message in the status line for a few seconds."""
+        self._flash_text = (text, time.monotonic() + seconds)
 
     def _update_msg_rate(self, snapshot: Snapshot) -> None:
         """Update the rolling messages/sec estimate from two successive snapshots'
@@ -966,7 +989,7 @@ class App:
             # A screen, when open, gets first refusal on every key: it owns the keyboard
             # until it says it is done.
             if self._screen is not None:
-                if self._screen.handle_key(key) == "close":
+                if self._screen.handle_key(key) in ("close", "close-and-save"):
                     self._close_screen()
                 continue
 

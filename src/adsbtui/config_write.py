@@ -33,7 +33,7 @@ from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
-from adsbtui.config import Config
+from adsbtui.config import _SECTIONS, CONFIG_SCHEMA, Config
 
 #: Two comment lines that head the generated file, so someone opening it in an editor
 #: knows what wrote it and that hand-edits are fine.
@@ -132,7 +132,7 @@ def dump_config_str(cfg: Config) -> str:
     The private bookkeeping attributes load_config() stamps on a Config (_args,
     _config_path) are skipped -- they are not part of the file schema.
     """
-    lines: list[str] = list(_FILE_HEADER)
+    lines: list[str] = [*_FILE_HEADER, f"schema = {CONFIG_SCHEMA}"]
 
     for section_field in fields(cfg):
         if section_field.name.startswith("_"):
@@ -163,9 +163,37 @@ def dump_config(cfg: Config, path: str | os.PathLike[str]) -> None:
     write can never leave a truncated config behind; on any failure the temp file is
     removed and the original target is untouched.
     """
+    _atomic_write(path, dump_config_str(cfg))
+
+
+def dump_layer_str(layer: dict[str, dict[str, Any]]) -> str:
+    """Render only the given section -> key -> value mapping (a file layer plus edits),
+    in schema order. Keys that are not in the layer are not written."""
+    lines: list[str] = [*_FILE_HEADER, f"schema = {CONFIG_SCHEMA}"]
+    for section_name, section_cls in _SECTIONS.items():
+        body = layer.get(section_name)
+        if not body:
+            continue
+        lines.append("")
+        comment = _SECTION_COMMENTS.get(section_name)
+        if comment:
+            lines.append(f"# {comment}")
+        lines.append(f"[{section_name}]")
+        for value_field in fields(section_cls):
+            if value_field.name in body:
+                lines.append(f"{value_field.name} = {_format_value(body[value_field.name])}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def dump_layer(layer: dict[str, dict[str, Any]], path: str | os.PathLike[str]) -> None:
+    """Write a file layer to path, atomically (see dump_config)."""
+    _atomic_write(path, dump_layer_str(layer))
+
+
+def _atomic_write(path: str | os.PathLike[str], text: str) -> None:
     target = Path(path).expanduser()
     target.parent.mkdir(parents=True, exist_ok=True)
-    text = dump_config_str(cfg)
 
     fd, tmp_name = tempfile.mkstemp(
         dir=str(target.parent), prefix=f".{target.name}.", suffix=".tmp"
