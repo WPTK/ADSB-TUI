@@ -42,11 +42,10 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
+from adsbtui.config import RegistryConfig
 from adsbtui.enrich.registry_update import (
-    FAA_URL,
     SOURCE_FAA,
     SOURCE_TAR1090,
-    TAR1090_URL,
     BuildResult,
     ProgressFn,
     RegistryError,
@@ -173,13 +172,20 @@ def format_status(status: SourceStatus) -> str:
     return f"{status.spec.label:<10} {detail:<14} {age:<19} {status.spec.license}"
 
 
-def default_updater(source: str, db_path: str, progress_fn: ProgressFn) -> BuildResult:
-    """Fetch one source from its canonical URL into db_path (the real, networked path)."""
-    if source == SOURCE_TAR1090:
-        return build_from_tar1090(TAR1090_URL, db_path, progress_fn)
-    if source == SOURCE_FAA:
-        return build_from_faa_zip(FAA_URL, db_path, progress_fn)
-    raise RegistryError(f"{source} is not a downloadable registry source")
+def make_updater(tar1090_url: str, faa_url: str) -> UpdateFn:
+    """An updater that fetches each source from the configured URL into db_path."""
+
+    def updater(source: str, db_path: str, progress_fn: ProgressFn) -> BuildResult:
+        if source == SOURCE_TAR1090:
+            return build_from_tar1090(tar1090_url, db_path, progress_fn)
+        if source == SOURCE_FAA:
+            return build_from_faa_zip(faa_url, db_path, progress_fn)
+        raise RegistryError(f"{source} is not a downloadable registry source")
+
+    return updater
+
+
+default_updater = make_updater(RegistryConfig().tar1090_url, RegistryConfig().faa_url)
 
 
 class DataScreen:

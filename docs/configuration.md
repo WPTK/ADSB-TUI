@@ -81,7 +81,9 @@ quiet_hours = "22:00-07:00"
 **`[watchlist]`**: `path` (default `~/.config/adsbtui/watchlist.txt`, see below)
 
 **`[registry]`**: `db` (SQLite path), `max_age_days` (`1`, how old before a background refresh),
-`auto_update` (`true`). See [Aircraft data](#aircraft-data-owner-type-country).
+`auto_update` (`true`), `tar1090_url` and `faa_url` (the download locations; the real upstreams by
+default, an http(s) URL or file path otherwise). A download that would shrink the database below
+half its current size is refused. See [Aircraft data](#aircraft-data-owner-type-country).
 
 **`[history]`**: `db` (`""` disables sighting history), `retention_days` (`365`)
 

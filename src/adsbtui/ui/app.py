@@ -58,7 +58,7 @@ from adsbtui.ui import bars, radar, theme
 from adsbtui.ui import columns as columns_mod
 from adsbtui.ui.keys import ACTION_FOR_KEY, BAR_KEYMAP, HELP_KEYMAP
 from adsbtui.ui.screens.columns import ColumnsScreen
-from adsbtui.ui.screens.data import DataScreen
+from adsbtui.ui.screens.data import DataScreen, make_updater
 from adsbtui.ui.screens.detail import DetailScreen
 from adsbtui.ui.screens.filters import FiltersScreen
 from adsbtui.ui.screens.help import HelpScreen
@@ -368,7 +368,7 @@ class App:
             self._registry_status = "registry updating"
             try:
                 result = registry_update.build_from_tar1090(
-                    registry_update.TAR1090_URL, db_path, progress_fn=_progress
+                    self.cfg.registry.tar1090_url, db_path, progress_fn=_progress
                 )
             except Exception as exc:  # never let a download kill the session
                 self._logger.warning("registry update failed: %s", exc)
@@ -796,6 +796,7 @@ class App:
             self._screen = DataScreen(
                 self.cfg.registry.db,
                 stale_after_days=self.cfg.registry.max_age_days,
+                updater=make_updater(self.cfg.registry.tar1090_url, self.cfg.registry.faa_url),
             )
         self._screen_name = name if self._screen is not None else None
 
