@@ -1,7 +1,7 @@
 """Tests for resolving a bare receiver address to a working aircraft.json URL.
 
 This exists because typing the obvious thing -- the receiver's IP -- used to be routed to
-the FILE loader and fail with "file not found: 192.168.3.80", a message that never even
+the FILE loader and fail with "file not found: 192.0.2.10", a message that never even
 suggests the network was skipped. The dispatch table below is the regression guard for
 that, and the probe tests cover what happens once a host is recognised.
 """
@@ -28,17 +28,17 @@ PAYLOAD = b'{"now": 1.0, "messages": 2, "aircraft": [{"hex": "abc123"}]}'
 class TestDispatch:
     @pytest.mark.parametrize(
         "text",
-        ["192.168.3.80", "192.168.3.80:8080", "adsb.local", "adsb-pi", "10.0.0.5"],
+        ["192.0.2.10", "192.0.2.10:8080", "adsb.local", "adsb-pi", "10.0.0.5"],
     )
     def test_a_bare_address_becomes_a_receiver_probe(self, text):
         assert isinstance(make_source(text), ReceiverSource)
 
-    @pytest.mark.parametrize("text", ["http://192.168.3.80", "http://192.168.3.80/"])
+    @pytest.mark.parametrize("text", ["http://192.0.2.10", "http://192.0.2.10/"])
     def test_a_scheme_with_no_path_is_still_a_receiver(self, text):
         # "http://host" names a machine, not a document.
         source = make_source(text)
         assert isinstance(source, ReceiverSource)
-        assert source.host == "192.168.3.80"
+        assert source.host == "192.0.2.10"
 
     def test_a_full_url_is_used_verbatim(self):
         url = "http://host/tar1090/data/aircraft.json"
@@ -63,7 +63,7 @@ class TestDispatch:
     @pytest.mark.parametrize(
         ("text", "expected"),
         [
-            ("192.168.3.80", True),
+            ("192.0.2.10", True),
             ("host:8080", True),
             ("aircraft.json", False),  # a filename, not a host
             ("data.csv", False),

@@ -1,7 +1,8 @@
 # ADSB-TUI
 
 A terminal UI for watching aircraft near you, fed by your own `readsb` or `dump1090-fa` receiver.
-Python 3.11+, no third-party dependencies.
+Python 3.11+, no runtime dependencies (on Windows, `pip install ".[windows]"` adds
+`windows-curses`, because Python there has no `curses`).
 
 ![adsbtui showing live traffic around SFO: the aircraft table with altitude-coloured rows and the radar scope](docs/screenshots/main.png)
 
@@ -39,7 +40,7 @@ The first run starts a setup wizard that finds your receiver and home location a
 `~/.config/adsbtui/config.toml`. To skip it:
 
 ```bash
-adsbtui --url 192.168.3.80 --lat 37.7749 --lon -122.4194
+adsbtui --url 192.0.2.10 --lat 37.7749 --lon -122.4194
 ```
 
 `--url` takes a receiver address (the usual `aircraft.json` paths are probed), an exact URL, or
@@ -71,15 +72,17 @@ adsbtui --check                 # validate config and fetch once
 
 ## Configuration
 
-Settings (`F2`) covers every option. Flags override `ADSBTUI_<SECTION>_<KEY>` environment
+Settings (`F2`) covers every option. The config file is `$ADSBTUI_CONFIG`, else
+`$XDG_CONFIG_HOME/adsbtui/config.toml` (`~/.config/adsbtui/config.toml` by default); the current
+directory is never searched. Flags override `ADSBTUI_<SECTION>_<KEY>` environment
 variables, which override `config.toml`. The full key list, column meanings and the watchlist
 format are in [docs/configuration.md](docs/configuration.md).
 
 ## Known gaps
 
-These settings are saved but not applied yet: `display.theme`, `display.density`,
-`display.vs_threshold_fpm`, `watchlist.pin_top`, `watchlist.ignore_radius`, `source.stale_s`,
-`logging.redact_home`.
+`source.stale_s` is saved but not applied yet. Config files that still set the retired keys
+`display.theme`, `display.density`, `display.vs_threshold_fpm`, `watchlist.pin_top`,
+`watchlist.ignore_radius` or `logging.redact_home` keep loading; the keys are ignored.
 
 ## Development
 

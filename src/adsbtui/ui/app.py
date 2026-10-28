@@ -1011,7 +1011,7 @@ class App:
                 search_text=self._search_text,
             )
         elif name == "columns":
-            self._screen = ColumnsScreen(display.columns, display.density, display.borders)
+            self._screen = ColumnsScreen(display.columns, display.borders)
         elif name == "watchlist":
             self._screen = WatchlistScreen(
                 self._watch_entries, self._selected_aircraft(aircraft_list)
@@ -1052,7 +1052,6 @@ class App:
         elif name == "columns":
             result = screen.result()
             display.columns = list(result.get("columns", display.columns))
-            display.density = str(result.get("density", display.density))
             display.borders = str(result.get("borders", display.borders))
         elif name == "watchlist":
             self._watch_entries = list(screen.result())

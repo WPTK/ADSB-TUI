@@ -38,10 +38,7 @@ from adsbtui.units import (
     format_vspeed,
 )
 
-#: Vertical-rate threshold used to classify the "vs" column's trend glyph. This mirrors
-#: DisplayConfig.vs_threshold_fpm's default (see config.py); format_row()'s signature is
-#: fixed by the caller's contract and has no room for a config object, so the module
-#: default is used directly rather than threading one more parameter through every call.
+#: Vertical-rate threshold (ft/min) used to classify the "vs" column's trend glyph.
 DEFAULT_VS_THRESHOLD_FPM = 256.0
 
 

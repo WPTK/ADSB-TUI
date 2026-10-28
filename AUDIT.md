@@ -21,7 +21,7 @@ milestones land: `Open`, `Fixed (M#)`, or `Won't fix: reason`.
 | F05 | 33, 90 | Every failure (bad URL, 404, timeout, missing CSV, bad JSON) is swallowed to the log silently | R | B05 | Fixed (M3) |
 | F06 | 11 | Root logger at DEBUG opened at import time in CWD; unbounded urllib3 chatter | R | B08 | Fixed (M3) |
 | F07 | 119 | `stdscr.clear()` every 100 ms forces a full repaint 10x/s | R | B04 | Fixed (M3) |
-| F08 | 57-92 | One malformed record discards the entire fetch and blanks the table | D | B03 | Fixed (M1) |
+| F08 | 57-92 | One malformed record discards the entire fetch and blanks the table | D | B03 | Fixed (M1); regressed for non-finite numbers, see A03 (Meeting 1) |
 | F09 | 14-16 | Config lives in committed source with unvalidated placeholders | R | B02, B08 | Fixed (M1) |
 | F10 | 26 | `pandas` pulled in for a two-column dict; not installed in sandbox; heavy on a Pi | D | B03 | Fixed (M1) |
 | F11 | 110 | `curses.curs_set(0)` unguarded: raises on terminals without cursor-visibility capability | R | B04 | Fixed (M3) |
@@ -35,7 +35,7 @@ milestones land: `Open`, `Fixed (M#)`, or `Won't fix: reason`.
 
 | ID | Line | Finding | Ver | Fix | Status |
 |---|---|---|---|---|---|
-| F17 | 63-70 | `seen_pos` ignored: stale positions used for distance/alert | D (docs) | B10 | Fixed (M2) |
+| F17 | 63-70 | `seen_pos` ignored: stale positions used for distance/alert | D (docs) | B10 | Partly fixed (M2): display only; stale and lost aircraft are still graded and dispatched, see A07 |
 | F18 | 98, 130 | "Last Update" shows wall clock; naive `datetime` interval can go negative on a clock step | R | B04, B05 | Fixed (M3) |
 | F19 | 139 | Alert is a current-distance check, not the overflight prediction the README describes | R | B13 | Fixed (M6) |
 | F20 | 76 | readsb enrichment fields (`r`, `t`, `desc`, `ownOp`, `year`, `dbFlags`) discarded | D (docs) | B11 | Fixed (M2) |
@@ -51,8 +51,8 @@ milestones land: `Open`, `Fixed (M#)`, or `Won't fix: reason`.
 | F30 | repo | 20.7 MB `MASTER.csv` committed, undated, 3-column subset | D | B22 | Fixed (M0) |
 | F31 | README 163-165 | "Non-US"/"type needs paid API"/"military-LADD-PIA" limitations are solvable for free | D (docs) | B22-B25 | Fixed (M2, M8): the receiver's own enrichment fields are read first; the in-app Data screen (`F8`) also downloads and builds a local SQLite registry from the FAA bulk registry and tar1090-db on request, covering non-US aircraft and type without a paid API. |
 | F32 | README 155 | Claims unique-aircraft logging; nothing but errors is logged | R | B29, B33 | Fixed (M9): each closed track is now summarised into a SQLite sightings table, and the README describes what is actually recorded. |
-| F33 | 157-162 | Untrusted JSON strings reach `addstr` unfiltered: NUL raises uncaught `ValueError` | R | B06 | Fixed (M1) |
-| F34 | 58 | No response size cap or wall-clock bound on the fetch | R | B03, B04 | Fixed (M1) |
+| F33 | 157-162 | Untrusted JSON strings reach `addstr` unfiltered: NUL raises uncaught `ValueError` | R | B06 | Fixed (M1); regressed for NUL in hex/reg/type/squawk, see A02 |
+| F34 | 58 | No response size cap or wall-clock bound on the fetch | R | B03, B04 | Partly fixed (M1): the size cap holds, there is no wall-clock bound, see A05 |
 
 ## Low / Info
 
@@ -61,16 +61,19 @@ milestones land: `Open`, `Fixed (M#)`, or `Won't fix: reason`.
 | F35 | 115 | First fetch waits a full refresh interval; empty table at launch | R | B04 | Fixed (M3) |
 | F36 | 138, 155 | Per-frame sort/format and O(n*m) alert membership check | R | B04 | Fixed (M3) |
 | F37 | 111, 178 | `nodelay`+`sleep` instead of `stdscr.timeout()` | R | B04 | Fixed (M3) |
-| F38 | 135 | Poll period drifts because timestamp is taken after the fetch | R | B04 | Fixed (M3) |
+| F38 | 135 | Poll period drifts because timestamp is taken after the fetch | R | B04 | Open: the wait still follows the work, see A24 |
 | F39 | 113 | CSV loads after curses init with a blank screen | D | B03 | Fixed (M3) |
 | F40 | 52 | `get_direction`: banker's rounding at exact boundaries; unreachable 17th entry | D | B01 | Fixed (M2) |
-| F41 | 70, 84 | `0 < distance` excludes exact-overhead aircraft; `.0f` renders 359.5 as 360 | D | B01 | Fixed (M2) |
+| F41 | 70, 84 | `0 < distance` excludes exact-overhead aircraft; `.0f` renders 359.5 as 360 | D | B01 | Fixed (M2); regressed, 359.6 shows as 360, see A09 |
 | F42 | 98 | "Last Update" line is 2 columns short, border misaligned | D | B06 | Fixed (M3) |
 | F43 | 152 | A user-converted CSV with truly empty cells would crash `owner[:30]` via pandas NaN | D | B03 | Won't fix as stated: pandas removed entirely (B03); not reachable in the new code |
 | F44 | 134 | `seen_aircraft` grows for the life of the process | R | B29 | Partly fixed (M3): tracks are now aged out of memory via the linger window rather than accumulating forever. |
 | F45 | README | No H1 title, placeholder URL, stray bullet, typos, overstated license text, no config/troubleshooting sections | D | B33 | Fixed (M10) |
 | F46 | repo | No version, tags, or changelog | D | B09 | Fixed (M0) |
-| F47 | 58 | New TCP connection per poll (no keep-alive) | R | B03 | Fixed (M1) |
+| F47 | 58 | New TCP connection per poll (no keep-alive) | R | B03 | Open: each poll still opens a new connection; low value, see A25 |
+
+Status refreshed by Meeting 1 (2026-10-27): seven rows above were re-checked against `main` and no longer
+read Fixed; A-numbers refer to the Meeting 1 findings.
 
 Refuted or downgraded during review: a NaN-owner crash does not occur with the shipped file;
 `get_direction` is otherwise correct; no duplicate or malformed hex codes exist in `MASTER.csv`.
