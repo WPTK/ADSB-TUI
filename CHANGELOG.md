@@ -2,6 +2,9 @@
 
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+Versions follow [ZeroVer](https://0ver.org) (see `docs/versioning.md`). The Unreleased changes
+include breaking ones (config discovery from the working directory is gone, `display.density`
+is removed), so the next release is 0.10.0; the version stays 0.9.0 until then.
 
 ## [Unreleased]
 
