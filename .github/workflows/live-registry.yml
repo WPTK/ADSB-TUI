@@ -1,0 +1,33 @@
+name: Live registry
+
+# Downloads the real tar1090-db and FAA files, so an upstream change is noticed here and
+# not by a user. Never runs on a pull request: it needs the network and the upstreams'
+# goodwill. Opens an issue when it fails.
+on:
+  schedule:
+    - cron: "41 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  live-registry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e .
+      - run: python tests/live/live_registry_check.py
+      - name: Open an issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Live registry check failed"
+          if [ -z "$(gh issue list --state open --search "$title in:title" --json number -q '.[].number')" ]; then
+            gh issue create --title "$title"               --body "The weekly check against the real registry upstreams failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi

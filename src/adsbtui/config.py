@@ -132,6 +132,11 @@ class RegistryConfig:
     #: Download automatically when the database is missing or older than max_age_days.
     #: Off means the Data screen (F8) is the only way to get one.
     auto_update: bool = True
+    #: Where each registry source is downloaded from. The defaults are the real upstreams;
+    #: they are settings so a test (or a mirror) can point at another server. An http(s)
+    #: URL or a local file path.
+    tar1090_url: str = "https://raw.githubusercontent.com/wiedehopf/tar1090-db/csv/aircraft.csv.gz"
+    faa_url: str = "https://registry.faa.gov/database/ReleasableAircraft.zip"
 
 
 @dataclass
