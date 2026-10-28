@@ -81,8 +81,13 @@ def drawing(monkeypatch):
         for i in range(2000)
     ]
     app = App(cfg, _Source())
-    app._attrs = {}  # noqa: SLF001 - plain attributes: no curses colour setup needed
+    app.renderer.attrs = {}  # plain attributes: no curses colour setup needed
     return app, _Window(), fleet
+
+
+def _paint(app, window, rows) -> None:
+    app.view.rows = rows
+    app._paint(window)  # noqa: SLF001
 
 
 def _cpu_per_frame(frame) -> float:
@@ -96,14 +101,14 @@ def _cpu_per_frame(frame) -> float:
 @needs_untraced
 def test_a_frame_after_a_fetch_is_within_budget(drawing):
     app, window, fleet = drawing
-    cost = _cpu_per_frame(lambda: app._draw(window, list(fleet), None, time.time(), False))  # noqa: SLF001
+    cost = _cpu_per_frame(lambda: _paint(app, window, list(fleet)))
     assert cost < COLD_BUDGET_S, f"{cost * 1000:.1f} ms per frame"
 
 
 @needs_untraced
 def test_a_redraw_of_the_same_data_is_cheap(drawing):
     app, window, fleet = drawing
-    cost = _cpu_per_frame(lambda: app._draw(window, fleet, None, time.time(), False))  # noqa: SLF001
+    cost = _cpu_per_frame(lambda: _paint(app, window, fleet))
     assert cost < WARM_BUDGET_S, f"{cost * 1000:.1f} ms per frame"
 
 
@@ -115,5 +120,5 @@ def test_the_radar_is_plotted_once_per_update(drawing, monkeypatch):
     real = radar.render
     monkeypatch.setattr(radar, "render", lambda *a, **k: calls.append(1) or real(*a, **k))
     for _ in range(5):
-        app._draw(window, fleet, None, time.time(), False)  # noqa: SLF001
+        _paint(app, window, fleet)
     assert len(calls) == 1
