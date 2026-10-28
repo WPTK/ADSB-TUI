@@ -40,7 +40,6 @@ from collections.abc import Callable
 from typing import Any
 
 from adsbtui import (
-    __version__,
     config_write,
     dispatch,
     enrich,
@@ -49,22 +48,14 @@ from adsbtui import (
     pipeline,
 )
 from adsbtui import watchlist as watchlist_mod
-from adsbtui.config import Config, changed_keys, default_config_path, layer_for_save
+from adsbtui.config import Config, default_config_path, layer_for_save
 from adsbtui.enrich import registry_update
 from adsbtui.model import Aircraft
 from adsbtui.sources import Source, SourceError
+from adsbtui.ui.controller import Controller, Outcome
 from adsbtui.ui.frame import Frame
-from adsbtui.ui.keys import ACTION_FOR_KEY, HELP_KEYMAP
-from adsbtui.ui.render import Renderer, layout_for
-from adsbtui.ui.screens.columns import ColumnsScreen
-from adsbtui.ui.screens.data import DataScreen, make_updater
-from adsbtui.ui.screens.detail import DetailScreen
-from adsbtui.ui.screens.filters import FiltersScreen
-from adsbtui.ui.screens.help import HelpScreen
-from adsbtui.ui.screens.settings import SettingsScreen
-from adsbtui.ui.screens.sort import SortScreen
-from adsbtui.ui.screens.watchlist import WatchlistScreen
-from adsbtui.ui.sorting import SORT_KEYS, sort_aircraft
+from adsbtui.ui.render import Layout, Renderer, layout_for
+from adsbtui.ui.sorting import SORT_KEYS, sort_aircraft  # noqa: F401 - re-export until B2-6
 from adsbtui.ui.view import ViewState
 
 #: getch() timeout in milliseconds. Must be <= 250 per the task's requirement so the UI
@@ -76,13 +67,6 @@ GETCH_TIMEOUT_MS = 200
 BACKOFF_BASE_S = 1.0
 
 _LOGGER_NAME = "adsbtui"
-
-#: Key-table actions that open a screen of the same name.
-_SCREEN_ACTIONS = frozenset(
-    {"help", "settings", "data", "detail", "filters", "sort", "columns", "watchlist"}
-)
-
-_UNIT_SYSTEMS = ["imperial", "metric", "aviation"]
 
 
 def run_check(cfg: Config, source: Source, clock: Callable[[], float] = time.time) -> int:
@@ -123,6 +107,7 @@ class App:
         #: Schedules the fetch period; immune to wall-clock steps.
         self._monotonic = monotonic
         self.view = ViewState(cfg)
+        self.controller = Controller(self.view, self)
         self._logger = logging.getLogger(_LOGGER_NAME)
 
         self._initial_enricher = self._build_enricher()
@@ -158,8 +143,6 @@ class App:
         )
 
         self._frame_seq = 0
-        #: (section, key) pairs edited in Settings this session; saved with the file layer.
-        self._edited: set[tuple[str, str]] = set()
 
     # The UI state lives in ``self.view``; these keep the names the screens and tests use.
     @property
@@ -213,14 +196,6 @@ class App:
     @_enricher.setter
     def _enricher(self, value: enrich.Enricher) -> None:
         self._pipeline.enricher = value
-
-    @property
-    def _watch_entries(self) -> list[watchlist_mod.WatchEntry]:
-        return self._pipeline.watch_entries
-
-    @_watch_entries.setter
-    def _watch_entries(self, value: list[watchlist_mod.WatchEntry]) -> None:
-        self._pipeline.watch_entries = value
 
     def _build_dispatcher(self) -> dispatch.Dispatcher:
         return dispatch.Dispatcher(
@@ -360,11 +335,15 @@ class App:
     def _attrs(self, value: dict[str, int]) -> None:
         self.renderer.attrs = value
 
+    def _layout(self, stdscr) -> Layout:
+        height, width = stdscr.getmaxyx()
+        return layout_for(width, height, self.view)
+
     def _paint(self, stdscr) -> None:
         """Lay out, keep the cursor in view, and draw ``self.view``."""
         view = self.view
         view.registry_note = self._registry_status
-        layout = layout_for(*reversed(stdscr.getmaxyx()), view)
+        layout = self._layout(stdscr)
         if not layout.too_small:
             view.clamp(len(view.rows), layout.table_height)
         self.renderer.draw(stdscr, view, layout)
@@ -379,149 +358,55 @@ class App:
             view.last_ok = Frame(0, last_success_at, None, aircraft_list, None, False)
         self._paint(stdscr)
 
-    def _page_size(self, stdscr) -> int:
-        """Rows of table visible right now, for PageUp/PageDown."""
-        height, _ = stdscr.getmaxyx()
-        return max(1, height - 4)
-
     def _clamp_view(self, total: int, table_height: int) -> None:
         self.view.clamp(total, table_height)
-
-    def _selected_aircraft(self, aircraft_list: list[Aircraft]) -> Aircraft | None:
-        if not aircraft_list:
-            return None
-        index = max(0, min(self._cursor, len(aircraft_list) - 1))
-        return aircraft_list[index]
-
-    def _open_screen(self, name: str, aircraft_list: list[Aircraft]) -> None:
-        """Construct and push the named screen. Unknown names are ignored."""
-        display = self.cfg.display
-        screen: Any = None
-        if name == "help":
-            screen = HelpScreen(HELP_KEYMAP, __version__)
-        elif name == "detail":
-            ac = self._selected_aircraft(aircraft_list)
-            if ac is None:
-                return
-            screen = DetailScreen(ac, display.units)
-        elif name == "sort":
-            screen = SortScreen(SORT_KEYS, display.sort_key, display.sort_reverse)
-        elif name == "filters":
-            f = self.cfg.filter
-            screen = FiltersScreen(
-                {
-                    "hide_ground": f.hide_ground,
-                    "include_nonicao": f.include_nonicao,
-                    "min_alt_ft": f.min_alt_ft,
-                    "max_alt_ft": f.max_alt_ft,
-                },
-                search_text=self._search_text,
-            )
-        elif name == "columns":
-            screen = ColumnsScreen(display.columns, display.borders)
-        elif name == "watchlist":
-            screen = WatchlistScreen(self._watch_entries, self._selected_aircraft(aircraft_list))
-        elif name == "settings":
-            screen = SettingsScreen(self.cfg)
-        elif name == "data":
-            screen = DataScreen(
-                self.cfg.registry.db,
-                stale_after_days=self.cfg.registry.max_age_days,
-                updater=make_updater(self.cfg.registry.tar1090_url, self.cfg.registry.faa_url),
-            )
-        if screen is not None:
-            self.view.push(name, screen)
-
-    def _close_screen(self) -> None:
-        """Pop the active screen, applying whatever it produced back onto live config.
-
-        Every screen keeps its own committed result (Escape leaves it untouched), so
-        reading result() unconditionally here is safe: a cancelled screen returns exactly
-        what it was given.
-        """
-        popped = self.view.pop()
-        if popped is None:
-            return
-        name, screen = popped
-
-        display = self.cfg.display
-        if name == "sort":
-            display.sort_key, display.sort_reverse = screen.result()
-        elif name == "filters":
-            result = screen.result()
-            f = self.cfg.filter
-            f.hide_ground = bool(result.get("hide_ground", f.hide_ground))
-            f.include_nonicao = bool(result.get("include_nonicao", f.include_nonicao))
-            f.min_alt_ft = int(result.get("min_alt_ft", f.min_alt_ft))
-            f.max_alt_ft = int(result.get("max_alt_ft", f.max_alt_ft))
-            self._search_text = str(result.get("search_text", self._search_text) or "")
-        elif name == "columns":
-            result = screen.result()
-            display.columns = list(result.get("columns", display.columns))
-            display.borders = str(result.get("borders", display.borders))
-        elif name == "watchlist":
-            self._watch_entries = list(screen.result())
-            if self.cfg.watchlist.path:
-                try:
-                    watchlist_mod.save(self.cfg.watchlist.path, self._watch_entries)
-                except OSError as exc:
-                    self._logger.warning("could not save watchlist: %s", exc)
-        elif name == "settings":
-            self._apply_settings(screen)
-        elif name == "data":
-            # A finished download changes what the enricher can resolve, so rebuild it
-            # rather than leaving the session querying the databases it started with.
-            outcomes = screen.take_finished()
-            if any(outcome.ok for outcome in outcomes):
-                self._enricher = self._build_enricher()
-                self._logger.info("registry updated; enrichment reloaded")
-
-    def _apply_settings(self, screen: SettingsScreen) -> None:
-        """Adopt an edited config into the running session, and persist it if asked.
-
-        Applying and saving are separate user intents: you may want to try a setting for
-        this session without writing it to disk. The screen reports both, and the session
-        adopts the change either way.
-        """
-        if not getattr(screen, "applied", False):
-            return
-        new_cfg = screen.result()
-        # Carry over the bookkeeping attributes the screen does not own.
-        new_cfg._args = self.cfg._args
-        new_cfg._config_path = self.cfg._config_path
-        new_cfg._file_layer = self.cfg._file_layer
-        self._edited |= changed_keys(self.cfg, new_cfg)
-        self.cfg = new_cfg
-        self.view.cfg = new_cfg
-        self._pipeline.cfg = new_cfg
-
-        # Settings that feed long-lived objects have to be re-read, not just stored.
-        self._enricher = self._build_enricher()
-        self._dispatcher = self._build_dispatcher()
-
-        if getattr(screen, "save_requested", False):
-            path = self.cfg._config_path or default_config_path()
-            layer = layer_for_save(self.cfg._file_layer, self.cfg, self._edited)
-            try:
-                config_write.dump_layer(layer, path)
-            except OSError as exc:
-                self._logger.warning("could not save configuration to %s: %s", path, exc)
-                self._flash(f"could not save settings: {exc.strerror or exc}")
-            else:
-                self.cfg._config_path = path
-                self.cfg._file_layer = layer
-                self._edited.clear()
-                self._logger.info("configuration saved to %s", path)
-                self._flash("settings saved")
 
     def _current_note(self) -> str | None:
         """The status-line note: a recent flash message, else the registry job's progress."""
         self.view.registry_note = self._registry_status
         return self.view.note()
 
-    def _flash(self, text: str, seconds: float = 6.0) -> None:
-        """Show a short message in the status line for a few seconds."""
-        self.view.flash_for(text, seconds)
+    def _open_screen(self, name: str, aircraft_list: list[Aircraft]) -> None:
+        self.view.rows = aircraft_list
+        self.controller.screens.open(name)
+
+    def _close_screen(self) -> None:
+        self.controller.screens.close()
+
+    # --- Effects: what the Controller asks of the rest of the program ----------------
+
+    @property
+    def watch_entries(self) -> list[watchlist_mod.WatchEntry]:
+        return self._pipeline.watch_entries
+
+    def refresh_now(self) -> None:
+        """Nothing waits on the fetch period yet; B2-8 wakes the fetch loop here."""
+
+    def set_enricher(self) -> None:
+        self._enricher = self._build_enricher()
+
+    def set_dispatcher(self) -> None:
+        self._dispatcher = self._build_dispatcher()
+
+    def set_watch_entries(self, entries: list[watchlist_mod.WatchEntry]) -> None:
+        self._pipeline.watch_entries = entries
+
+    def set_pipeline_cfg(self, cfg: Config) -> None:
+        self.cfg = cfg
+        self._pipeline.cfg = cfg
+
+    def save_config(self, cfg: Config, edited: set[tuple[str, str]]) -> str | None:
+        path = cfg._config_path or default_config_path()
+        layer = layer_for_save(cfg._file_layer, cfg, edited)
+        try:
+            config_write.dump_layer(layer, path)
+        except OSError as exc:
+            self._logger.warning("could not save configuration to %s: %s", path, exc)
+            return f"could not save settings: {exc.strerror or exc}"
+        cfg._config_path = path
+        cfg._file_layer = layer
+        self._logger.info("configuration saved to %s", path)
+        return None
 
     # ------------------------------------------------------------------
     # Main event loop
@@ -546,7 +431,7 @@ class App:
             # is swapped in here, on the main thread, rather than under a running fetch.
             if self._registry_done.is_set():
                 self._registry_done.clear()
-                self._enricher = self._build_enricher()
+                self.set_enricher()
                 view.dirty = True
 
             # The bell fires here rather than on the fetch thread: curses.beep() is a
@@ -565,45 +450,8 @@ class App:
             if key == curses.KEY_RESIZE:
                 continue
 
-            # A screen, when open, gets first refusal on every key: it owns the keyboard
-            # until it says it is done.
-            if view.screen is not None:
-                if view.screen.handle_key(key) in ("close", "close-and-save"):
-                    self._close_screen()
-                continue
-
-            action = ACTION_FOR_KEY.get(key)
-            if action == "quit":
+            if self.controller.handle_key(key, self._layout(stdscr)) is Outcome.QUIT:
                 return 0
-            if action in _SCREEN_ACTIONS:
-                self._open_screen(action, view.rows)
-            elif action == "reverse":
-                self.cfg.display.sort_reverse = not self.cfg.display.sort_reverse
-            elif action == "pause":
-                view.paused = not view.paused
-            elif action == "radar":
-                view.radar_on = not view.radar_on
-            elif action == "units":
-                current = self.cfg.display.units
-                index = _UNIT_SYSTEMS.index(current) if current in _UNIT_SYSTEMS else 0
-                self.cfg.display.units = _UNIT_SYSTEMS[(index + 1) % len(_UNIT_SYSTEMS)]
-            elif action == "up":
-                view.cursor -= 1
-            elif action == "down":
-                view.cursor += 1
-            elif action == "top":
-                view.cursor = 0
-            elif action == "bottom":
-                view.cursor = max(0, len(view.rows) - 1)
-            elif action == "page_up":
-                view.cursor -= max(1, self._page_size(stdscr))
-            elif action == "page_down":
-                view.cursor += max(1, self._page_size(stdscr))
-            elif action == "radius":
-                if key in (ord("+"), ord("=")):
-                    self.cfg.filter.radius += 1.0
-                else:
-                    self.cfg.filter.radius = max(1.0, self.cfg.filter.radius - 1.0)
 
     def run(self, stdscr) -> int:
         """Entry point for curses.wrapper(app.run). Returns the process exit code."""

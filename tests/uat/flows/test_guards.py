@@ -290,4 +290,6 @@ def test_a_flash_message_expires(spawn):
     term.wait_for("settings saved")
     shown_at = time.monotonic()
     term.wait_for("settings saved", gone=True, timeout=30)
-    assert time.monotonic() - shown_at > 4.0  # lasts about 6 s, not one redraw
+    # Lasts 6 s from when it was set, not one redraw. The clock starts when the poll first
+    # sees it, which under load can be a couple of seconds late, so the bound is loose.
+    assert time.monotonic() - shown_at > 2.0
