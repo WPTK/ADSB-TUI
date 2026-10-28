@@ -12,7 +12,8 @@ import pytest
 from adsbtui.config import Config
 from adsbtui.model import Aircraft, AlertLevel
 from adsbtui.pipeline import enrich_all
-from adsbtui.ui.app import SORT_KEYS, App, sort_aircraft
+from adsbtui.ui.app import App
+from adsbtui.ui.sorting import SORT_KEYS, sort_aircraft
 
 
 class _StubSource:
@@ -38,6 +39,11 @@ def _app(cfg: Config | None = None) -> App:
     return App(cfg or _config(), _StubSource())
 
 
+def _open(app: App, name: str, rows: list) -> None:
+    app.view.rows = rows
+    app.controller.screens.open(name)
+
+
 def _ac(hex_id="abc123", **kw) -> Aircraft:
     defaults = dict(is_icao=True, distance_mi=5.0, altitude_ft=10000.0)
     defaults.update(kw)
@@ -51,21 +57,21 @@ def _ac(hex_id="abc123", **kw) -> Aircraft:
 
 def test_cursor_and_scroll_clamp_to_the_list():
     app = _app()
-    app._cursor = 99
-    app._clamp_view(total=10, table_height=5)
-    assert app._cursor == 9
-    assert app._scroll == 5  # the window followed the cursor to the end
+    app.view.cursor = 99
+    app.view.clamp(total=10, table_height=5)
+    assert app.view.cursor == 9
+    assert app.view.scroll == 5  # the window followed the cursor to the end
 
-    app._cursor = 0
-    app._clamp_view(total=10, table_height=5)
-    assert app._scroll == 0
+    app.view.cursor = 0
+    app.view.clamp(total=10, table_height=5)
+    assert app.view.scroll == 0
 
 
 def test_empty_list_resets_the_view():
     app = _app()
-    app._cursor, app._scroll = 4, 4
-    app._clamp_view(total=0, table_height=5)
-    assert (app._cursor, app._scroll) == (0, 0)
+    app.view.cursor, app.view.scroll = 4, 4
+    app.view.clamp(total=0, table_height=5)
+    assert (app.view.cursor, app.view.scroll) == (0, 0)
 
 
 # ----------------------------------------------------------------------------------
@@ -75,51 +81,51 @@ def test_empty_list_resets_the_view():
 
 def test_opening_and_closing_the_sort_screen_applies_its_result():
     app = _app()
-    app._open_screen("sort", [])
-    assert app._screen is not None
+    _open(app, "sort", [])
+    assert app.view.screen is not None
 
     # Drive the screen the way a user would: pick the next sort key, then apply.
-    app._screen._key_select.handle_key(ord(" "))
-    app._screen.handle_key(ord("\n"))
-    app._close_screen()
+    app.view.screen._key_select.handle_key(ord(" "))
+    app.view.screen.handle_key(ord("\n"))
+    app.controller.screens.close()
 
-    assert app._screen is None
+    assert app.view.screen is None
     assert app.cfg.display.sort_key == "altitude"
 
 
 def test_detail_screen_needs_a_selected_aircraft():
     app = _app()
-    app._open_screen("detail", [])
-    assert app._screen is None  # nothing selected, so nothing to show
+    _open(app, "detail", [])
+    assert app.view.screen is None  # nothing selected, so nothing to show
 
-    app._open_screen("detail", [_ac("aa", flight="UAL123")])
-    assert app._screen is not None
-    assert "UAL123" in app._screen.title
+    _open(app, "detail", [_ac("aa", flight="UAL123")])
+    assert app.view.screen is not None
+    assert "UAL123" in app.view.screen.title
 
 
 def test_filters_screen_result_lands_on_the_live_config():
     app = _app()
-    app._open_screen("filters", [])
-    app._screen._hide_ground.handle_key(ord(" "))  # flip the toggle
-    app._screen.handle_key(ord("\n"))  # apply
-    app._close_screen()
+    _open(app, "filters", [])
+    app.view.screen._hide_ground.handle_key(ord(" "))  # flip the toggle
+    app.view.screen.handle_key(ord("\n"))  # apply
+    app.controller.screens.close()
     assert app.cfg.filter.hide_ground is True
 
 
 def test_escaping_a_screen_changes_nothing():
     app = _app()
     before = app.cfg.display.sort_key
-    app._open_screen("sort", [])
-    app._screen._key_select.handle_key(ord(" "))  # move the selection...
-    app._screen.handle_key(27)  # ...then escape instead of applying
-    app._close_screen()
+    _open(app, "sort", [])
+    app.view.screen._key_select.handle_key(ord(" "))  # move the selection...
+    app.view.screen.handle_key(27)  # ...then escape instead of applying
+    app.controller.screens.close()
     assert app.cfg.display.sort_key == before
 
 
 def test_unknown_screen_name_is_ignored():
     app = _app()
-    app._open_screen("does-not-exist", [])
-    assert app._screen is None
+    _open(app, "does-not-exist", [])
+    assert app.view.screen is None
 
 
 # ----------------------------------------------------------------------------------
@@ -226,7 +232,7 @@ def test_enricher_fills_registration_and_country_with_no_databases_at_all():
     aircraft rather than showing a hex code and nothing else."""
     app = _app()
     ac = _ac("a004b3")  # a real US civil hex
-    enrich_all([ac], app._enricher)
+    enrich_all([ac], app._pipeline.enricher)
     assert ac.registration is not None
 
 
@@ -235,7 +241,7 @@ def test_enrichment_never_overwrites_what_the_receiver_sent():
     knows better than anything we derive."""
     app = _app()
     ac = _ac("a004b3", registration="N-FROM-FEED", type_code="C172")
-    enrich_all([ac], app._enricher)
+    enrich_all([ac], app._pipeline.enricher)
     assert ac.registration == "N-FROM-FEED"
     assert ac.type_code == "C172"
 
@@ -247,21 +253,21 @@ def test_a_failing_lookup_cannot_break_the_fetch_loop():
         def lookup(self, aircraft):
             raise RuntimeError("provider exploded")
 
-    app._enricher = Boom()
-    enrich_all([_ac("a004b3")], app._enricher)  # must not raise
+    app._pipeline.enricher = Boom()
+    enrich_all([_ac("a004b3")], app._pipeline.enricher)  # must not raise
 
 
 def test_settings_screen_opens_and_applying_adopts_the_new_config():
     app = _app()
-    app._open_screen("settings", [])
-    assert app._screen is not None
+    _open(app, "settings", [])
+    assert app.view.screen is not None
 
-    edited = app._screen.result()
+    edited = app.view.screen.result()
     edited.filter.radius = 42.0
-    app._screen.result = lambda: edited
-    app._screen.applied = True
-    app._screen.save_requested = False
-    app._close_screen()
+    app.view.screen.result = lambda: edited
+    app.view.screen.applied = True
+    app.view.screen.save_requested = False
+    app.controller.screens.close()
 
     assert app.cfg.filter.radius == 42.0
 
@@ -269,9 +275,9 @@ def test_settings_screen_opens_and_applying_adopts_the_new_config():
 def test_cancelled_settings_screen_changes_nothing():
     app = _app()
     before = app.cfg.filter.radius
-    app._open_screen("settings", [])
-    app._screen.applied = False
-    app._close_screen()
+    _open(app, "settings", [])
+    app.view.screen.applied = False
+    app.controller.screens.close()
     assert app.cfg.filter.radius == before
 
 
@@ -282,13 +288,13 @@ def test_saving_settings_writes_a_config_file_that_loads_back(tmp_path):
     target = tmp_path / "config.toml"
     app.cfg._config_path = str(target)
 
-    app._open_screen("settings", [])
-    edited = app._screen.result()
+    _open(app, "settings", [])
+    edited = app.view.screen.result()
     edited.filter.radius = 23.0
-    app._screen.result = lambda: edited
-    app._screen.applied = True
-    app._screen.save_requested = True
-    app._close_screen()
+    app.view.screen.result = lambda: edited
+    app.view.screen.applied = True
+    app.view.screen.save_requested = True
+    app.controller.screens.close()
 
     assert target.exists()
     with open(target, "rb") as handle:
@@ -300,30 +306,30 @@ def test_data_screen_success_rebuilds_the_enricher():
     """A finished download changes what can be resolved, so the session must not keep
     querying the databases it started with."""
     app = _app()
-    app._open_screen("data", [])
-    before = app._enricher
+    _open(app, "data", [])
+    before = app._pipeline.enricher
 
     from adsbtui.ui.screens.data import UpdateOutcome
 
-    app._screen.take_finished = lambda: [
+    app.view.screen.take_finished = lambda: [
         UpdateOutcome(source=None, ok=True, row_count=10, message="done")
     ]
-    app._close_screen()
-    assert app._enricher is not before
+    app.controller.screens.close()
+    assert app._pipeline.enricher is not before
 
 
 def test_data_screen_failure_leaves_the_enricher_alone():
     app = _app()
-    app._open_screen("data", [])
-    before = app._enricher
+    _open(app, "data", [])
+    before = app._pipeline.enricher
 
     from adsbtui.ui.screens.data import UpdateOutcome
 
-    app._screen.take_finished = lambda: [
+    app.view.screen.take_finished = lambda: [
         UpdateOutcome(source=None, ok=False, row_count=None, message="download failed")
     ]
-    app._close_screen()
-    assert app._enricher is before
+    app.controller.screens.close()
+    assert app._pipeline.enricher is before
 
 
 def test_a_bug_in_the_fetch_loop_becomes_an_error_banner_not_a_dead_thread(monkeypatch):
@@ -355,13 +361,13 @@ def test_a_bug_in_the_fetch_loop_becomes_an_error_banner_not_a_dead_thread(monke
 
 
 def _save_settings(app, edit):
-    app._open_screen("settings", [])
-    edited = app._screen.result()
+    _open(app, "settings", [])
+    edited = app.view.screen.result()
     edit(edited)
-    app._screen.result = lambda: edited
-    app._screen.applied = True
-    app._screen.save_requested = True
-    app._close_screen()
+    app.view.screen.result = lambda: edited
+    app.view.screen.applied = True
+    app.view.screen.save_requested = True
+    app.controller.screens.close()
 
 
 def test_a_failed_settings_save_is_shown_in_the_status_line(tmp_path):
@@ -370,7 +376,7 @@ def test_a_failed_settings_save_is_shown_in_the_status_line(tmp_path):
     app = _app()
     app.cfg._config_path = str(blocker / "config.toml")  # parent is a file: unwritable
     _save_settings(app, lambda c: setattr(c.filter, "radius", 23.0))
-    assert "could not save settings" in (app._current_note() or "")
+    assert "could not save settings" in (app.view.note() or "")
     assert app.cfg.filter.radius == 23.0  # applied for the session anyway
 
 
@@ -378,7 +384,7 @@ def test_a_successful_settings_save_says_so(tmp_path):
     app = _app()
     app.cfg._config_path = str(tmp_path / "config.toml")
     _save_settings(app, lambda c: setattr(c.filter, "radius", 23.0))
-    assert app._current_note() == "settings saved"
+    assert app.view.note() == "settings saved"
 
 
 def test_settings_save_writes_only_the_file_layer_and_the_edit(tmp_path):

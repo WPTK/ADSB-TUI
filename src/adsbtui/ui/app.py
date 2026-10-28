@@ -55,7 +55,7 @@ from adsbtui.sources import Source, SourceError
 from adsbtui.ui.controller import Controller, Outcome
 from adsbtui.ui.frame import Frame
 from adsbtui.ui.render import Layout, Renderer, layout_for
-from adsbtui.ui.sorting import SORT_KEYS, sort_aircraft  # noqa: F401 - re-export until B2-6
+from adsbtui.ui.sorting import sort_aircraft
 from adsbtui.ui.view import ViewState
 
 #: getch() timeout in milliseconds. Must be <= 250 per the task's requirement so the UI
@@ -143,59 +143,6 @@ class App:
         )
 
         self._frame_seq = 0
-
-    # The UI state lives in ``self.view``; these keep the names the screens and tests use.
-    @property
-    def _cursor(self) -> int:
-        return self.view.cursor
-
-    @_cursor.setter
-    def _cursor(self, value: int) -> None:
-        self.view.cursor = value
-
-    @property
-    def _scroll(self) -> int:
-        return self.view.scroll
-
-    @_scroll.setter
-    def _scroll(self, value: int) -> None:
-        self.view.scroll = value
-
-    @property
-    def _radar_on(self) -> bool:
-        return self.view.radar_on
-
-    @_radar_on.setter
-    def _radar_on(self, value: bool) -> None:
-        self.view.radar_on = value
-
-    @property
-    def _search_text(self) -> str:
-        return self.view.search_text
-
-    @_search_text.setter
-    def _search_text(self, value: str) -> None:
-        self.view.search_text = value
-
-    @property
-    def _screen(self) -> Any:
-        return self.view.screen
-
-    @property
-    def _screen_name(self) -> str | None:
-        return self.view.screen_name
-
-    @property
-    def _flash_text(self) -> tuple[str, float] | None:
-        return self.view.flash
-
-    @property
-    def _enricher(self) -> enrich.Enricher:
-        return self._pipeline.enricher
-
-    @_enricher.setter
-    def _enricher(self, value: enrich.Enricher) -> None:
-        self._pipeline.enricher = value
 
     def _build_dispatcher(self) -> dispatch.Dispatcher:
         return dispatch.Dispatcher(
@@ -287,7 +234,7 @@ class App:
             try:
                 raw = self.source.fetch(self.cfg.source.timeout_s)
                 now = self._clock()
-                result = self._pipeline.tick(raw, now, self._search_text)
+                result = self._pipeline.tick(raw, now, self.view.search_text)
                 display = self.cfg.display
                 ordered = sort_aircraft(result.aircraft, display.sort_key, display.sort_reverse)
                 frame = self._frame(now, result.snapshot, ordered, None, result.feed_stale)
@@ -327,14 +274,6 @@ class App:
         with contextlib.suppress(queue.Full):
             out_queue.put_nowait(item)
 
-    @property
-    def _attrs(self) -> dict[str, int]:
-        return self.renderer.attrs
-
-    @_attrs.setter
-    def _attrs(self, value: dict[str, int]) -> None:
-        self.renderer.attrs = value
-
     def _layout(self, stdscr) -> Layout:
         height, width = stdscr.getmaxyx()
         return layout_for(width, height, self.view)
@@ -348,31 +287,6 @@ class App:
             view.clamp(len(view.rows), layout.table_height)
         self.renderer.draw(stdscr, view, layout)
 
-    def _draw(self, stdscr, aircraft_list, last_error, last_success_at, paused) -> None:
-        """Draw explicit data by putting it in the view first; goes with the call sites in B2-6."""
-        view = self.view
-        view.rows, view.paused = aircraft_list, paused
-        if last_error != view.error:
-            view.frame = Frame(0, view.now, None, [], last_error, False)
-        if view.last_ok is None and last_success_at is not None:
-            view.last_ok = Frame(0, last_success_at, None, aircraft_list, None, False)
-        self._paint(stdscr)
-
-    def _clamp_view(self, total: int, table_height: int) -> None:
-        self.view.clamp(total, table_height)
-
-    def _current_note(self) -> str | None:
-        """The status-line note: a recent flash message, else the registry job's progress."""
-        self.view.registry_note = self._registry_status
-        return self.view.note()
-
-    def _open_screen(self, name: str, aircraft_list: list[Aircraft]) -> None:
-        self.view.rows = aircraft_list
-        self.controller.screens.open(name)
-
-    def _close_screen(self) -> None:
-        self.controller.screens.close()
-
     # --- Effects: what the Controller asks of the rest of the program ----------------
 
     @property
@@ -383,7 +297,7 @@ class App:
         """Nothing waits on the fetch period yet; B2-8 wakes the fetch loop here."""
 
     def set_enricher(self) -> None:
-        self._enricher = self._build_enricher()
+        self._pipeline.enricher = self._build_enricher()
 
     def set_dispatcher(self) -> None:
         self._dispatcher = self._build_dispatcher()

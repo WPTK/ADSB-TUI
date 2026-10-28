@@ -157,7 +157,7 @@ def _app() -> App:
     cfg.registry.db = ""
     cfg.watchlist.path = ""
     app = App(cfg, _Source())
-    app._attrs = dict(_STYLE_ATTR)  # noqa: SLF001
+    app.renderer.attrs = dict(_STYLE_ATTR)
     return app
 
 
@@ -174,8 +174,15 @@ def render(app: App, window: RecordingWindow, state: str) -> None:
     app.view.msg_rate = 321.0 if fleet else None
     app.view.cursor = 6 if fleet else 0
     if state in ("help", "detail", "sort", "settings"):
-        app._open_screen(state, fleet)  # noqa: SLF001
-    app._draw(window, fleet, error, last_ok, state == "paused")  # noqa: SLF001
+        app.view.rows = fleet
+        app.controller.screens.open(state)
+    app.view.rows = fleet
+    app.view.paused = state == "paused"
+    if error:
+        app.view.frame = Frame(0, NOW, None, [], error, False)
+    if last_ok is not None and app.view.last_ok is None:
+        app.view.last_ok = Frame(0, last_ok, None, fleet, None, False)
+    app._paint(window)  # noqa: SLF001
 
 
 def _log() -> list[str]:
