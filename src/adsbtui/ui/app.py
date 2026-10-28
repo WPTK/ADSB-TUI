@@ -281,6 +281,11 @@ class App:
         self._radar_on = True
         self._search_text = ""
         self._feed_stale = False
+        #: Per-update draw caches (A22). The aircraft list is replaced once per fetch, but
+        #: the screen is redrawn every second and on every key; the table rows and the
+        #: radar plot only change when the list, the layout or the scope settings do.
+        self._row_cache: tuple[object, list[Aircraft], dict[int, str]] | None = None
+        self._scope_cache: tuple[list[Aircraft], object, radar.Scope] | None = None
         #: (section, key) pairs edited in Settings this session; saved with the file layer.
         self._edited: set[tuple[str, str]] = set()
         self._flash_text: tuple[str, float] | None = None
@@ -611,8 +616,21 @@ class App:
         self._clamp_view(len(aircraft_list), table_height)
         visible = aircraft_list[self._scroll : self._scroll + table_height]
 
+        row_key = (tuple(widths), tuple(columns), display.units, ascii_only)
+        if (
+            self._row_cache is None
+            or self._row_cache[0] != row_key
+            or self._row_cache[1] is not aircraft_list
+        ):
+            self._row_cache = (row_key, aircraft_list, {})
+        row_texts = self._row_cache[2]
+
         for i, ac in enumerate(visible):
-            row_text = columns_mod.format_row(ac, columns, widths, display.units, ascii_only)
+            index = self._scroll + i
+            row_text = row_texts.get(index)
+            if row_text is None:
+                row_text = columns_mod.format_row(ac, columns, widths, display.units, ascii_only)
+                row_texts[index] = row_text
             if self._scroll + i == self._cursor and aircraft_list:
                 attr = self._attrs.get("selected", curses.A_REVERSE)
             else:
@@ -665,14 +683,26 @@ class App:
         # applied; asking for more just pads it with blank rows and strands the caption
         # far below the rings.
         scope_h = min(height - 2, int(width * radar.ASPECT) + 2)
-        scope = radar.render(
-            aircraft_list,
-            width=width,
-            height=scope_h,
-            range_mi=self.cfg.filter.radius,
-            selected_hex=selected.hex if selected else None,
-            ascii_only=ascii_only,
+        scope_key = (
+            width,
+            scope_h,
+            self.cfg.filter.radius,
+            selected.hex if selected else None,
+            ascii_only,
         )
+        cached = self._scope_cache
+        if cached is not None and cached[0] is aircraft_list and cached[1] == scope_key:
+            scope = cached[2]
+        else:
+            scope = radar.render(
+                aircraft_list,
+                width=width,
+                height=scope_h,
+                range_mi=self.cfg.filter.radius,
+                selected_hex=selected.hex if selected else None,
+                ascii_only=ascii_only,
+            )
+            self._scope_cache = (aircraft_list, scope_key, scope)
 
         for row_index, line in enumerate(scope.lines):
             styles = scope.styles[row_index]
