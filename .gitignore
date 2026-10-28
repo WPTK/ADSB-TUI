@@ -12,3 +12,6 @@ config.toml
 MASTER.csv
 .pytest_cache/
 .ruff_cache/
+
+# UAT screen dumps written on failure
+tests/uat/_artifacts/

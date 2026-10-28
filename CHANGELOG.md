@@ -26,6 +26,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 - `Aircraft.extra`, an unread copy of every raw record made on every tick.
+- **The root `adsbtui.py` compatibility shim is gone.** Run `adsbtui` or `python -m adsbtui`.
 - **The current directory is no longer searched for `adsb-tui.toml`.** A config can set
   `alerts.command`, so a file in an untrusted directory could run a command.
 - **Six settings that did nothing are gone**: `display.theme`, `display.density` (and the
@@ -34,7 +35,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the keys are ignored.
 
 ### Changed
-- The sdist no longer ships the screenshots, `AUDIT.md` or the root `adsbtui.py` shim.
+- The sdist no longer ships the screenshots or `AUDIT.md`.
 - Docs: config file discovery order, what `timeout_s` really bounds, and the Windows
   `windows-curses` extra next to "no runtime dependencies". The kiosk unit no longer claims the
   entry point is missing.

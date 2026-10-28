@@ -418,9 +418,8 @@ class TestApplyFilters:
 def test_output_module_never_imports_curses(tmp_path):
     """The whole reason this module exists: --headless must work with no terminal at all.
 
-    Checked in a fresh interpreter (cwd outside the repo so the adsbtui.py shim at the
-    repository root does not shadow the package) because an earlier test importing curses
-    would make an in-process sys.modules check meaningless.
+    Checked in a fresh interpreter because an earlier test importing curses would make an
+    in-process sys.modules check meaningless.
     """
     src_root = Path(output.__file__).resolve().parents[1]
     code = "import sys, adsbtui.output; sys.exit(1 if 'curses' in sys.modules else 0)"
