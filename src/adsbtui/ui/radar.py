@@ -60,6 +60,14 @@ class Scope:
         return len(self.lines)
 
 
+def _cell(v: float) -> int:
+    """Round a plot coordinate to a cell, halves up. Python's round() sends halves to the
+    even neighbour, and sin(pi)/cos(pi/2) leave ~1e-16 of noise, so on a scope with an even
+    number of rows E and W landed on different rows. Rounding the noise away first makes
+    every tie resolve the same way."""
+    return int(math.floor(round(v, 9) + 0.5))
+
+
 def _blank(width: int, height: int) -> tuple[list[list[str]], list[list[str]]]:
     grid = [[" "] * width for _ in range(height)]
     styles = [[""] * width for _ in range(height)]
@@ -144,19 +152,19 @@ def render(
         steps = max(16, int(2 * math.pi * ring_r))
         for step in range(steps):
             angle = 2 * math.pi * step / steps
-            col = int(round(cx + ring_r * math.sin(angle)))
-            row = int(round(cy - ring_r * math.cos(angle) * ASPECT))
+            col = _cell(cx + ring_r * math.sin(angle))
+            row = _cell(cy - ring_r * math.cos(angle) * ASPECT)
             put(col, row, ring_char, "ring")
 
     # --- compass ticks -----------------------------------------------------------
     for label, bearing in (("N", 0.0), ("E", 90.0), ("S", 180.0), ("W", 270.0)):
         rad = math.radians(bearing)
-        col = int(round(cx + radius_cols * math.sin(rad)))
-        row = int(round(cy - radius_cols * math.cos(rad) * ASPECT))
+        col = _cell(cx + radius_cols * math.sin(rad))
+        row = _cell(cy - radius_cols * math.cos(rad) * ASPECT)
         put(col, row, label, "header", force=True)
 
     # --- home --------------------------------------------------------------------
-    put(int(round(cx)), int(round(cy)), "+" if ascii_only else "⌂", "header", force=True)
+    put(_cell(cx), _cell(cy), "+" if ascii_only else "⌂", "header", force=True)
 
     # --- aircraft ----------------------------------------------------------------
     for ac in aircraft_list:
@@ -166,8 +174,8 @@ def render(
             continue
         scaled = (ac.distance_mi / range_mi) * radius_cols
         rad = math.radians(ac.bearing_deg)
-        col = int(round(cx + scaled * math.sin(rad)))
-        row = int(round(cy - scaled * math.cos(rad) * ASPECT))
+        col = _cell(cx + scaled * math.sin(rad))
+        row = _cell(cy - scaled * math.cos(rad) * ASPECT)
         selected = selected_hex is not None and ac.hex == selected_hex
         style = _style_for(ac, selected)
         # force=False on purpose. An aircraft still overwrites rings, ticks and the home

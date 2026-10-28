@@ -511,3 +511,10 @@ def test_ground_traffic_gets_no_closest_approach():
         cpa_seconds=3400.0,
     )
     assert _cell_for("cpa", ac).strip() == ""
+
+
+def test_climb_and_tail_floors_fit_their_ordinary_values():
+    """A narrow terminal gets each column's min_width, which used to cut '+1500 fpm' to
+    '+1500 fp' and a 7-character registration like '12-1234' to '12-123'."""
+    assert COLUMN_SPECS["vs"].min_width >= len("↑ +1500 fpm")
+    assert COLUMN_SPECS["reg"].min_width >= len("B-18901")

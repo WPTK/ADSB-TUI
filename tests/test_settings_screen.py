@@ -360,6 +360,25 @@ class TestRendering:
         assert "F2" in footer
         assert "Esc" in footer
 
+    def test_narrow_width_wraps_the_footer_instead_of_cutting_it(self) -> None:
+        rendered = "\n".join(make_screen().render_lines(40, 30))
+        assert "Esc cancel" in rendered
+
+    def test_narrow_width_wraps_field_help_instead_of_cutting_it(self) -> None:
+        lines = make_screen().render_lines(40, 30)
+        assert all(len(line) <= 40 for line in lines)
+        # The first field's help is a sentence far longer than 40 columns; its last word
+        # must survive somewhere.
+        assert any("receiver" in line for line in lines)
+
+    def test_tab_row_keeps_the_active_section_visible_when_narrow(self) -> None:
+        screen = make_screen()
+        for _ in range(len(screen._sections) - 1):
+            screen.handle_key(ord("\t"))
+        row = screen.render_lines(40, 30)[0]
+        assert len(row) <= 40
+        assert f"[{screen._sections[-1][0]}]".lower() in row.lower()
+
 
 class TestUnhandledKeys:
     @pytest.mark.parametrize("key", [curses.KEY_F5, curses.KEY_MOUSE, curses.KEY_RESIZE])
