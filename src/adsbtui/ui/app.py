@@ -728,13 +728,13 @@ class App:
     # ------------------------------------------------------------------
 
     def _safe_addstr(self, stdscr, y: int, x: int, text: str, attr: int = 0) -> None:
-        """Write one string to the screen, swallowing curses.error.
+        """Write one string to the screen, swallowing curses.error and ValueError (an embedded NUL).
 
         Every draw call in this module routes through here so that writing to the
         bottom-right cell, or any other addstr() failure on a too-small/narrow terminal,
         never crashes the program -- it just skips that one piece of text.
         """
-        with contextlib.suppress(curses.error):
+        with contextlib.suppress(curses.error, ValueError):
             stdscr.addstr(y, x, text, attr)
 
     def _row_style_name(self, ac: Aircraft) -> str:

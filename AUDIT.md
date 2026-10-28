@@ -21,7 +21,7 @@ milestones land: `Open`, `Fixed (M#)`, or `Won't fix: reason`.
 | F05 | 33, 90 | Every failure (bad URL, 404, timeout, missing CSV, bad JSON) is swallowed to the log silently | R | B05 | Fixed (M3) |
 | F06 | 11 | Root logger at DEBUG opened at import time in CWD; unbounded urllib3 chatter | R | B08 | Fixed (M3) |
 | F07 | 119 | `stdscr.clear()` every 100 ms forces a full repaint 10x/s | R | B04 | Fixed (M3) |
-| F08 | 57-92 | One malformed record discards the entire fetch and blanks the table | D | B03 | Fixed (M1); regressed for non-finite numbers, see A03 (Meeting 1) |
+| F08 | 57-92 | One malformed record discards the entire fetch and blanks the table | D | B03 | Fixed (M1); non-finite numbers re-fixed at the boundary (Meeting 1 A03), guarded by `tests/property` |
 | F09 | 14-16 | Config lives in committed source with unvalidated placeholders | R | B02, B08 | Fixed (M1) |
 | F10 | 26 | `pandas` pulled in for a two-column dict; not installed in sandbox; heavy on a Pi | D | B03 | Fixed (M1) |
 | F11 | 110 | `curses.curs_set(0)` unguarded: raises on terminals without cursor-visibility capability | R | B04 | Fixed (M3) |
@@ -51,7 +51,7 @@ milestones land: `Open`, `Fixed (M#)`, or `Won't fix: reason`.
 | F30 | repo | 20.7 MB `MASTER.csv` committed, undated, 3-column subset | D | B22 | Fixed (M0) |
 | F31 | README 163-165 | "Non-US"/"type needs paid API"/"military-LADD-PIA" limitations are solvable for free | D (docs) | B22-B25 | Fixed (M2, M8): the receiver's own enrichment fields are read first; the in-app Data screen (`F8`) also downloads and builds a local SQLite registry from the FAA bulk registry and tar1090-db on request, covering non-US aircraft and type without a paid API. |
 | F32 | README 155 | Claims unique-aircraft logging; nothing but errors is logged | R | B29, B33 | Fixed (M9): each closed track is now summarised into a SQLite sightings table, and the README describes what is actually recorded. |
-| F33 | 157-162 | Untrusted JSON strings reach `addstr` unfiltered: NUL raises uncaught `ValueError` | R | B06 | Fixed (M1); regressed for NUL in hex/reg/type/squawk, see A02 |
+| F33 | 157-162 | Untrusted JSON strings reach `addstr` unfiltered: NUL raises uncaught `ValueError` | R | B06 | Fixed (M1); NUL in hex/reg/type/squawk re-fixed at the boundary (Meeting 1 A01, A02), guarded by `tests/test_injection.py` |
 | F34 | 58 | No response size cap or wall-clock bound on the fetch | R | B03, B04 | Partly fixed (M1): the size cap holds, there is no wall-clock bound, see A05 |
 
 ## Low / Info
@@ -64,7 +64,7 @@ milestones land: `Open`, `Fixed (M#)`, or `Won't fix: reason`.
 | F38 | 135 | Poll period drifts because timestamp is taken after the fetch | R | B04 | Open: the wait still follows the work, see A24 |
 | F39 | 113 | CSV loads after curses init with a blank screen | D | B03 | Fixed (M3) |
 | F40 | 52 | `get_direction`: banker's rounding at exact boundaries; unreachable 17th entry | D | B01 | Fixed (M2) |
-| F41 | 70, 84 | `0 < distance` excludes exact-overhead aircraft; `.0f` renders 359.5 as 360 | D | B01 | Fixed (M2); regressed, 359.6 shows as 360, see A09 |
+| F41 | 70, 84 | `0 < distance` excludes exact-overhead aircraft; `.0f` renders 359.5 as 360 | D | B01 | Fixed (M2); re-fixed (Meeting 1 A09), guarded by `tests/test_textwidth.py` |
 | F42 | 98 | "Last Update" line is 2 columns short, border misaligned | D | B06 | Fixed (M3) |
 | F43 | 152 | A user-converted CSV with truly empty cells would crash `owner[:30]` via pandas NaN | D | B03 | Won't fix as stated: pandas removed entirely (B03); not reachable in the new code |
 | F44 | 134 | `seen_aircraft` grows for the life of the process | R | B29 | Partly fixed (M3): tracks are now aged out of memory via the linger window rather than accumulating forever. |
