@@ -203,3 +203,11 @@ class TestClosestPointOfApproach:
         assert d_cpa is not None and t_cpa is not None
         assert 0.0 < d_cpa < start_distance
         assert t_cpa > 0.0
+
+
+def test_a_bearing_that_rounds_to_360_is_north():
+    # Found by hypothesis: cos(90 deg) is 6e-17, so the angle is a tiny negative number and
+    # `% 360.0` on it yields exactly 360.0.
+    from adsbtui.geo import initial_bearing_deg
+
+    assert initial_bearing_deg(0.0, 1.0, 90.0, 0.0) == 0.0
