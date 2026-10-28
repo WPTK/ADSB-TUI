@@ -1,0 +1,81 @@
+name: Release
+
+# Manual, from main only. Reads the version from the source (ZeroVer: 0.MINOR.PATCH, or
+# 0.MINOR.PATCHrcN for a pre-release), checks it, builds, and publishes a GitHub Release
+# tagged v<version>. It fails rather than replace: an existing tag or release stops it, and
+# nothing here deletes or overwrites a published release. See docs/versioning.md.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Check the version
+        id: version
+        run: |
+          python .github/scripts/release_check.py --tags "$(git tag --list 'v*')" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Refuse an existing release
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists; refusing to replace it" >&2
+            exit 1
+          fi
+
+      - name: Test
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m pytest -q
+
+      - name: Build
+        run: |
+          python -m pip install build
+          python -m build
+
+      - name: The built version matches the tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python - <<'PY'
+          import glob, os, zipfile
+          (wheel,) = glob.glob("dist/*.whl")
+          with zipfile.ZipFile(wheel) as z:
+              name = next(n for n in z.namelist() if n.endswith(".dist-info/METADATA"))
+              meta = z.read(name).decode()
+          built = next(l.split(": ", 1)[1] for l in meta.splitlines() if l.startswith("Version: "))
+          assert built == os.environ["VERSION"], (built, os.environ["VERSION"])
+          print("wheel version", built)
+          PY
+
+      - name: Publish
+        # No --clobber, and the tag was checked above: gh creates the tag at this commit
+        # and fails if anything raced us.
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          flags=""
+          if [ "$PRERELEASE" = "true" ]; then flags="--prerelease"; fi
+          gh release create "$TAG" dist/* --target "$GITHUB_SHA" --title "$TAG" --generate-notes $flags
