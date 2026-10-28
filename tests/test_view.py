@@ -77,3 +77,19 @@ def test_dirty_is_set_when_the_second_changes():
     assert view.dirty is False
     view.tick(51.0)
     assert view.dirty is True
+
+
+def test_the_cursor_follows_its_aircraft_when_the_list_reorders():
+    view = ViewState(Config())
+    view.apply(_frame(1, 100.0, [_ac("a"), _ac("b"), _ac("c")]))
+    view.move_cursor(1)
+    view.apply(_frame(2, 105.0, [_ac("n"), _ac("a"), _ac("b"), _ac("c")]))
+    assert view.selected().hex == "b" and view.cursor == 2
+
+
+def test_the_cursor_keeps_its_row_when_its_aircraft_leaves():
+    view = ViewState(Config())
+    view.apply(_frame(1, 100.0, [_ac("a"), _ac("b"), _ac("c")]))
+    view.move_cursor(1)
+    view.apply(_frame(2, 105.0, [_ac("a"), _ac("c"), _ac("d")]))
+    assert view.cursor == 1 and view.selected_hex == "c"

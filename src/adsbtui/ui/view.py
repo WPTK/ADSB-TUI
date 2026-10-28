@@ -25,6 +25,9 @@ class ViewState:
     paused: bool = False
     radar_on: bool = True
     cursor: int = 0
+    #: The aircraft under the cursor. New frames move the cursor to follow it; the index is
+    #: only the fallback when that aircraft has left the list.
+    selected_hex: str | None = None
     scroll: int = 0
     search_text: str = ""
     #: Open screens as (name, screen). Never deeper than one today; keeps the stack shape.
@@ -73,6 +76,7 @@ class ViewState:
             self._update_msg_rate(frame.snapshot)
         if not self.paused:
             self.rows = frame.aircraft
+            self._follow_selection()
 
     def _update_msg_rate(self, snapshot: Snapshot) -> None:
         """Rolling messages/sec from two successive snapshots' cumulative counters. Resets to
@@ -105,6 +109,24 @@ class ViewState:
 
     # ------------------------------------------------------------------ cursor
 
+    def _follow_selection(self) -> None:
+        for index, ac in enumerate(self.rows):
+            if ac.hex == self.selected_hex:
+                self.cursor = index
+                return
+        self._pin()
+
+    def _pin(self) -> None:
+        if self.rows:
+            self.selected_hex = self.rows[max(0, min(self.cursor, len(self.rows) - 1))].hex
+        else:
+            self.selected_hex = None
+
+    def move_cursor(self, to: int) -> None:
+        """A user move: land inside the list and pin the aircraft there."""
+        self.cursor = max(0, min(to, len(self.rows) - 1))
+        self._pin()
+
     def selected(self) -> Aircraft | None:
         if not self.rows:
             return None
@@ -115,8 +137,10 @@ class ViewState:
         if total == 0:
             self.cursor = 0
             self.scroll = 0
+            self.selected_hex = None
             return
         self.cursor = max(0, min(self.cursor, total - 1))
+        self._pin()
         if table_height <= 0:
             self.scroll = 0
             return

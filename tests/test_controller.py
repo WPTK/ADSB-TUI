@@ -159,3 +159,13 @@ def test_a_failed_save_keeps_the_edits_and_shows_the_error():
     controller.screens.close()
     assert view.note() == "could not save settings: disk full"
     assert ("filter", "radius") in controller.screens.edited
+
+
+def test_escape_in_filters_leaves_the_filter_alone():
+    controller, view, _ = _controller()
+    before = view.cfg.filter.hide_ground
+    controller.screens.open("filters")
+    view.screen._hide_ground.handle_key(ord(" "))
+    assert view.screen.handle_key(27) == "close"
+    controller.screens.close()
+    assert view.cfg.filter.hide_ground is before and view.search_text == ""
