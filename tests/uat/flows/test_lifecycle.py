@@ -144,7 +144,6 @@ def test_unset_term_is_refused_with_a_hint(spawn):
     assert "could not find terminal" in term.text
 
 
-@pytest.mark.xfail(strict=True, reason="A18: TERM=dumb paints a blank screen and exits 0")
 def test_dumb_terminal_is_refused(spawn):
     term = spawn(wait_ready=False, env={"TERM": "dumb"})
     assert term.wait_exit() == 2
@@ -176,7 +175,6 @@ def test_colour_is_on_by_default(spawn):
     assert _coloured_cells(term) > 0
 
 
-@pytest.mark.xfail(strict=True, reason="A19: NO_COLOR is ignored with display.color=auto")
 def test_no_color_environment_variable(spawn):
     term = spawn(env={"NO_COLOR": "1"})
     term.wait_for("UAL123")

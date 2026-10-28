@@ -63,6 +63,17 @@ def _parse_args_quietly(argv: list[str] | None):
         return None
 
 
+def _terminal_can_draw() -> bool:
+    """False when TERM names a terminal without cursor addressing (TERM=dumb): curses would
+    start and paint a blank screen. An unset or unknown TERM is left to curses, which
+    already refuses it with its own message."""
+    try:
+        curses.setupterm()
+        return curses.tigetstr("cup") is not None
+    except curses.error:
+        return True
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the `adsbtui` console script. Returns a process exit code.
 
@@ -131,6 +142,10 @@ def main(argv: list[str] | None = None) -> int:
         return run_headless(cfg, source, stop_predicate=stop.is_set)
 
     # Default: the curses TUI. curses.wrapper restores the terminal even if run() raises.
+    if not _terminal_can_draw():
+        print("This terminal cannot move the cursor, so the TUI cannot draw.", file=sys.stderr)
+        print("Try 'adsbtui --once' instead, or set TERM to a real terminal.", file=sys.stderr)
+        return 2
     app = App(cfg, source)
     try:
         return curses.wrapper(app.run)

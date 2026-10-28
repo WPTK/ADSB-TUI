@@ -54,10 +54,15 @@ a local file such as `/run/readsb/aircraft.json`.
 | `F2` / `,` | Settings (every option, saved to `config.toml`) |
 | `F8` / `D` | Aircraft registry: status and manual update |
 | `Enter` | Details for the selected aircraft |
-| `s` / `f` / `c` / `w` | Sort / filter and search / columns / watchlist |
+| `Up` `Down` / `k` `j`, `PgUp` `PgDn`, `Home` `End` | Move the selection |
+| `d` | Details (same as `Enter`) |
+| `s` / `S` | Sort screen / reverse the sort |
+| `f` or `/` / `c` / `w` | Filter and search / columns / watchlist |
 | `r` / `u` / `p` | Toggle radar / cycle units / pause |
 | `+` / `-` | Grow / shrink the radius |
-| `q` | Quit |
+| `q` / `F10` | Quit |
+
+`F3`–`F7` open filters, sort, columns and watchlist as in the key bar. Help (`F1`) lists every key and scrolls.
 
 ![The detail pane for one aircraft, with closest approach and squawk](docs/screenshots/detail.png)
 

@@ -43,7 +43,6 @@ class TestHandleKey:
             ord(" "),
             27,  # Escape
             curses.KEY_F1,
-            curses.KEY_UP,
             curses.KEY_ENTER,
             10,
             0,
@@ -87,7 +86,7 @@ class TestRenderLines:
     def test_includes_dismiss_footer(self) -> None:
         screen = make_screen()
         lines = screen.render_lines(80, 40)
-        assert any("any key closes" in line.lower() for line in lines)
+        assert any("any other key closes" in line.lower() for line in lines)
 
     def test_lines_clipped_to_width(self) -> None:
         screen = make_screen()
@@ -109,7 +108,7 @@ class TestRenderLines:
         full = screen.render_lines(80, 1000)
         truncated = screen.render_lines(80, 3)
         assert len(truncated) == 3
-        assert truncated == full[:3]
+        assert truncated[-1] == full[-1]  # the way out stays visible
 
     def test_all_lines_are_plain_strings(self) -> None:
         screen = make_screen()
@@ -122,7 +121,7 @@ class TestRenderLines:
         lines = screen.render_lines(80, 40)
         text = "\n".join(lines)
         assert "1.2.3" in text
-        assert "any key closes" in text.lower()
+        assert "any other key closes" in text.lower()
 
     def test_no_curses_window_or_input_needed(self) -> None:
         # Sanity check on the design contract: render_lines/handle_key never touch a
