@@ -16,7 +16,6 @@ from __future__ import annotations
 import curses
 import json
 import re
-import time
 from pathlib import Path
 
 import pytest
@@ -25,6 +24,7 @@ from adsbtui.config import Config
 from adsbtui.model import Aircraft, AlertLevel
 from adsbtui.ui import theme
 from adsbtui.ui.app import App
+from adsbtui.ui.frame import Frame
 
 GOLDEN = Path(__file__).parent / "goldens" / "draw_log.jsonl"
 NOW = 1_700_000_000.0
@@ -166,12 +166,13 @@ def render(app: App, window: RecordingWindow, state: str) -> None:
     fleet = [] if state in ("empty", "error") else _fleet()
     error = "connection refused" if state == "error" else None
     last_ok = None if state in ("empty", "error") else NOW - 3
+    app.view.now = NOW
     if state == "stale":
-        app._feed_stale = True  # noqa: SLF001
+        app.view.last_ok = Frame(1, NOW - 3, None, fleet, None, True)
     if state == "ascii":
         app.cfg.display.borders = "ascii"
-    app._msg_rate = 321.0 if fleet else None  # noqa: SLF001
-    app._cursor = 6 if fleet else 0  # noqa: SLF001
+    app.view.msg_rate = 321.0 if fleet else None
+    app.view.cursor = 6 if fleet else 0
     if state in ("help", "detail", "sort", "settings"):
         app._open_screen(state, fleet)  # noqa: SLF001
     app._draw(window, fleet, error, last_ok, state == "paused")  # noqa: SLF001
@@ -194,7 +195,6 @@ def _log() -> list[str]:
 @pytest.fixture(autouse=True)
 def _fixed_time(monkeypatch):
     monkeypatch.setattr(curses, "doupdate", lambda: None)
-    monkeypatch.setattr(time, "time", lambda: NOW)
 
 
 def test_draw_matches_the_golden_log(request):
