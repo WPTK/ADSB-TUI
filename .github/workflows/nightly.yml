@@ -1,0 +1,60 @@
+name: Nightly
+
+# What is too slow or too flaky to gate every PR: the full OS x Python grid, the TUI flows
+# on macOS, a longer property-test run, and a Windows ConPTY smoke (not yet blocking).
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  grid:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+    env:
+      HYPOTHESIS_PROFILE: nightly
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
+      - if: runner.os == 'Windows'
+        run: python -m pip install -e ".[windows]"
+      - run: python -m pytest -q
+
+  macos-uat:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
+      - run: python -m pytest -m "uat or not uat" -n auto -q
+      - if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: macos-uat-screens
+          path: tests/uat/_artifacts/
+          if-no-files-found: ignore
+
+  windows-conpty-smoke:
+    # Launches the real app under ConPTY. Non-blocking until it has been green for two
+    # weeks: PDCurses + ConPTY on hosted runners is unproven.
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip && python -m pip install -e ".[dev,windows]" pywinpty
+      - run: python tests/uat/windows_conpty_smoke.py
