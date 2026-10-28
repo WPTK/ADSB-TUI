@@ -22,7 +22,7 @@ import pytest
 
 from adsbtui.config import Config
 from adsbtui.model import Aircraft, AlertLevel
-from adsbtui.ui import theme
+from adsbtui.ui import screen_stack, theme
 from adsbtui.ui.app import App
 from adsbtui.ui.frame import Frame
 
@@ -202,6 +202,8 @@ def _log() -> list[str]:
 @pytest.fixture(autouse=True)
 def _fixed_time(monkeypatch):
     monkeypatch.setattr(curses, "doupdate", lambda: None)
+    # The Help screen prints the version; pin it so a release bump never edits the goldens.
+    monkeypatch.setattr(screen_stack, "__version__", "0.0.0")
 
 
 def test_draw_matches_the_golden_log(request):

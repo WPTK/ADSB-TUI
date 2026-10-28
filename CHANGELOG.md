@@ -2,48 +2,15 @@
 
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-Versions follow [ZeroVer](https://0ver.org) (see `docs/versioning.md`). The Unreleased changes
-include breaking ones (config discovery from the working directory is gone, `display.density`
-is removed), so the next release is 0.10.0; the version stays 0.9.0 until then.
+Versions follow [ZeroVer](https://0ver.org) (see `docs/versioning.md`).
 
 ## [Unreleased]
 
-### Fixed
-- **Feed data is validated at the boundary.** Every string from `aircraft.json` is matched
-  against its wire format (hex, squawk, category, type, emergency) or stripped of control
-  characters and capped; every number must be finite and physically plausible. Escape
-  sequences in a hex, squawk or registration no longer reach `--once` output, a NUL no
-  longer crashes the detail screen, and `1e999`/`Infinity` no longer takes out a whole tick.
-  Registry data gets the same treatment before it fills a row.
-- A bearing of 359.6 reads `000`, not `360`.
-- `--format csv` ends lines with a bare newline on Windows, not a doubled carriage return.
-- A CJK callsign fills its cell instead of wrapping the row: cells are measured in terminal
-  columns, not characters.
-
-- **A bad source can no longer print a traceback.** A file that is not UTF-8, JSON nested
-  hundreds of thousands deep, a directory in place of a file and a malformed URL all report
-  as ordinary source errors. A bug inside the fetch loop is logged and shown in the banner
-  instead of being excused from test coverage.
-- **`source.timeout_s` is a wall-clock limit on the whole HTTP fetch.** A feed that drips a
-  byte at a time used to hang `--once` and `--check` forever; it now times out.
-
-### Removed
-- `Aircraft.extra`, an unread copy of every raw record made on every tick.
-- **The root `adsbtui.py` compatibility shim is gone.** Run `adsbtui` or `python -m adsbtui`.
-- **The current directory is no longer searched for `adsb-tui.toml`.** A config can set
-  `alerts.command`, so a file in an untrusted directory could run a command.
-- **Six settings that did nothing are gone**: `display.theme`, `display.density` (and the
-  density choice on the Columns screen), `display.vs_threshold_fpm`, `watchlist.pin_top`,
-  `watchlist.ignore_radius` and `logging.redact_home`. Config files that still set them load;
-  the keys are ignored.
-
-### Changed
-- The sdist no longer ships the screenshots or `AUDIT.md`.
-- Docs: config file discovery order, what `timeout_s` really bounds, and the Windows
-  `windows-curses` extra next to "no runtime dependencies". The kiosk unit no longer claims the
-  entry point is missing.
+## [0.10.0] - 2026-10-28
 
 ### Added
+- **`--demo` runs the whole TUI on built-in synthetic traffic**, with no receiver, network or config file. It reads no config and writes nothing.
+- **`adsbtui --version`** prints the version.
 - **A radar scope.** Aircraft are plotted around you with range rings, N/E/S/W ticks and a
   direction arrow per contact, so the shape of the traffic is visible instead of implied by a
   column of numbers. Appears automatically at 110 columns and wider; `r` toggles it, and it
@@ -111,6 +78,12 @@ is removed), so the next release is 0.10.0; the version stays 0.9.0 until then.
 - `.gitignore` for bytecode caches, logs, local config, and the local registry copy.
 
 ### Changed
+- **The first-run wizard is pre-filled** from `ADSBTUI_*` environment variables and command-line flags.
+- The sdist no longer ships the screenshots or `AUDIT.md`.
+- Docs: config file discovery order, what `timeout_s` really bounds, and the Windows
+  `windows-curses` extra next to "no runtime dependencies". The kiosk unit no longer claims the
+  entry point is missing.
+
 - **The table header is in plain English.** `GS`/`VS`/`BRG`/`CPA` are now
   `SPEED`/`CLIMB`/`DIRECTION`/`CLOSEST PASS`, with short forms kept only for terminals too
   narrow for the real words.
@@ -141,12 +114,43 @@ is removed), so the next release is 0.10.0; the version stays 0.9.0 until then.
   single-maintainer project.
 
 ### Removed
+- `Aircraft.extra`, an unread copy of every raw record made on every tick.
+- **The root `adsbtui.py` compatibility shim is gone.** Run `adsbtui` or `python -m adsbtui`.
+- **The current directory is no longer searched for `adsb-tui.toml`.** A config can set
+  `alerts.command`, so a file in an untrusted directory could run a command.
+- **Six settings that did nothing are gone**: `display.theme`, `display.density` (and the
+  density choice on the Columns screen), `display.vs_threshold_fpm`, `watchlist.pin_top`,
+  `watchlist.ignore_radius` and `logging.redact_home`. Config files that still set them load;
+  the keys are ignored.
+
 - **The legacy FAA registry CSV, completely**: `registry.path`, the `--registry` flag, the CSV
   enrichment provider, the loader, and the bundled sample fixture. The downloaded database and
   the receiver's own feed cover everything it did, and keeping a second, manual, US-only path
   around left the docs describing a workflow nobody should follow.
 
 ### Fixed
+- **The selection follows the aircraft**, not the row: when the table re-sorts or traffic changes, the highlighted contact stays the same one.
+- **`Esc` in the Filters screen cancels** instead of keeping the half-edited values.
+- **Sort and filter changes show at once.** The table is sorted when it is drawn, and changing the radius or a filter updates the screen without waiting for the next refresh.
+- **A typo in an existing config no longer opens the setup wizard.** The wizard (which would have overwritten the file) is offered only when no config file exists and `--demo` is not set; otherwise the error is printed and the exit code is 2.
+- **Feed data is validated at the boundary.** Every string from `aircraft.json` is matched
+  against its wire format (hex, squawk, category, type, emergency) or stripped of control
+  characters and capped; every number must be finite and physically plausible. Escape
+  sequences in a hex, squawk or registration no longer reach `--once` output, a NUL no
+  longer crashes the detail screen, and `1e999`/`Infinity` no longer takes out a whole tick.
+  Registry data gets the same treatment before it fills a row.
+- A bearing of 359.6 reads `000`, not `360`.
+- `--format csv` ends lines with a bare newline on Windows, not a doubled carriage return.
+- A CJK callsign fills its cell instead of wrapping the row: cells are measured in terminal
+  columns, not characters.
+
+- **A bad source can no longer print a traceback.** A file that is not UTF-8, JSON nested
+  hundreds of thousands deep, a directory in place of a file and a malformed URL all report
+  as ordinary source errors. A bug inside the fetch loop is logged and shown in the banner
+  instead of being excused from test coverage.
+- **`source.timeout_s` is a wall-clock limit on the whole HTTP fetch.** A feed that drips a
+  byte at a time used to hang `--once` and `--check` forever; it now times out.
+
 - **Aircraft on the ground are no longer graded OVERHEAD.** Taxiing traffic within
   `filter.proximity` used to ring the bell, fire the webhook and run the alert command, so
   living near an airport meant constant alerts. They now show `NEAR` in the ALERT column and
