@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fakefeed
 from keys import press
 
 
@@ -59,40 +60,16 @@ def test_data_screen_reports_an_empty_registry(spawn):
     term.wait_for("UAL123")
     for opener in ("D", "f8"):
         press(term, opener)
-        term.wait_for("Aircraft registry sources")
-        assert "not downloaded" in term.text
+        term.wait_for(
+            lambda t: "Aircraft registry sources" in t.text and "not downloaded" in t.text
+        )
         press(term, "esc")
         term.wait_for("Aircraft registry sources", gone=True)
+        term.pump(0.3)  # let the Esc settle before the next escape sequence (A44)
 
 
-def _serve_registry(tmp_path):
-    """A local tar1090-db: two aircraft, gzipped, served over HTTP."""
-    import gzip
-    import http.server
-    import threading
-
-    body = gzip.compress(
-        b"a1b2c3;N123UA;B738;00;BOEING 737-800;2010;UNITED AIR LINES;\n"
-        b"abc123;N456XY;C172;00;CESSNA 172;1980;SOME OWNER;\n"
-    )
-
-    class Handler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200)
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def log_message(self, *args):
-            pass
-
-    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return server
-
-
-def test_manual_update_from_a_fake_registry(spawn, tmp_path):
-    server = _serve_registry(tmp_path)
+def test_manual_update_from_a_fake_registry(spawn):
+    server = fakefeed.serve_registry()
     try:
         url = f"http://127.0.0.1:{server.server_port}/aircraft.csv.gz"
         term = spawn(env={"ADSBTUI_REGISTRY_TAR1090_URL": url})

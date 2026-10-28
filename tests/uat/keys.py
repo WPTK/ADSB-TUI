@@ -58,12 +58,22 @@ def selected_hex(term: Term) -> str:
     Reverse video cannot identify the cursor: an emergency row is reverse on its own.
     """
     press(term, "enter")
-    term.wait_for("Hex ")
-    line = next(line for line in term.lines if "Hex " in line and ":" in line)
-    hex_ = line.split(":", 1)[1].split("│")[0].strip()
+    term.wait_for(lambda t: _detail_hex(t) is not None)
+    hex_ = _detail_hex(term)
     press(term, "esc")
     term.wait_for("Hex ", gone=True)
+    assert hex_ is not None
     return hex_
+
+
+def _detail_hex(term: Term) -> str | None:
+    """The hex on the Detail screen's "Hex" row, or None until that row is fully drawn."""
+    for line in term.lines:
+        if "Hex " in line and ":" in line:
+            value = line.split(":", 1)[1].split("│")[0].strip()
+            if value:
+                return value
+    return None
 
 
 FIXTURE_ROWS = ["UAL123", "~A55501", "N12345", "AAL911", "SKW4455"]

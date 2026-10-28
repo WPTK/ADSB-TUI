@@ -11,6 +11,7 @@ N times" instead of guessing at time.
 
 from __future__ import annotations
 
+import gzip
 import http.server
 import json
 import threading
@@ -177,3 +178,26 @@ class FakeFeed:
         self._closed.set()
         self._server.shutdown()
         self._server.server_close()
+
+
+def serve_registry(delay_s: float = 0.0) -> http.server.HTTPServer:
+    """A local tar1090-db: two aircraft, gzipped, served over HTTP (optionally slowly)."""
+    body = gzip.compress(
+        b"a1b2c3;N123UA;B738;00;BOEING 737-800;2010;UNITED AIR LINES;\n"
+        b"abc123;N456XY;C172;00;CESSNA 172;1980;SOME OWNER;\n"
+    )
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            time.sleep(delay_s)
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format, *args) -> None:  # noqa: A002
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server

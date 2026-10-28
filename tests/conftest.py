@@ -20,3 +20,12 @@ settings.register_profile(
 )
 settings.register_profile("nightly", max_examples=2000, deadline=None)
 settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "ci"))
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--update-goldens",
+        action="store_true",
+        default=False,
+        help="rewrite the draw-log golden files instead of comparing against them",
+    )
