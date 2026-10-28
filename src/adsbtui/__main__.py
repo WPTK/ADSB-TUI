@@ -29,6 +29,7 @@ from .config import ConfigError, build_argparser, load_config
 from .logsetup import configure_logging
 from .output import run_batch, run_headless, run_once, run_watch
 from .sources import SourceError, make_source
+from .sources.demo import DemoSource, apply_demo_settings
 from .ui.app import App, run_check
 
 log = logging.getLogger("adsbtui")
@@ -85,6 +86,8 @@ def main(argv: list[str] | None = None) -> int:
     """
     try:
         cfg = load_config(argv)
+        if getattr(cfg._args, "demo", False):
+            apply_demo_settings(cfg)
     except ConfigError as exc:
         # A person at a terminal with no config yet is exactly who the setup wizard is
         # for, so offer it rather than sending them to the README. Scripted runs and
@@ -110,8 +113,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     log.info("adsbtui %s starting (config: %s)", __version__, cfg._config_path or "defaults")
 
+    demo = bool(getattr(cfg._args, "demo", False))
     try:
-        source = make_source(cfg.source.url, max_bytes=cfg.source.max_bytes)
+        if demo:
+            source = DemoSource(cfg.home.lat, cfg.home.lon)
+        else:
+            source = make_source(cfg.source.url, max_bytes=cfg.source.max_bytes)
     except (SourceError, ValueError) as exc:
         print(f"Cannot use source {cfg.source.url!r}: {exc}", file=sys.stderr)
         return 2

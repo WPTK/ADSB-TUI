@@ -556,6 +556,12 @@ def build_argparser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--check", action="store_true", default=False, help="validate config and exit"
     )
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        default=False,
+        help="show scripted traffic: no receiver, no network, nothing sent or written",
+    )
 
     return parser
 
@@ -569,7 +575,7 @@ def cli_overrides(args: argparse.Namespace) -> dict[str, Any]:
         if value is not None:
             overrides[dotted_key] = value
 
-    maybe("source.url", args.url)
+    maybe("source.url", "demo" if getattr(args, "demo", False) else args.url)
     maybe("home.lat", args.lat)
     maybe("home.lon", args.lon)
     maybe("filter.radius", args.radius)
@@ -623,7 +629,9 @@ def load_config(argv: list[str] | None = None) -> Config:
     env_dict = _env_overrides(dict(os.environ))
     cli_dict = cli_overrides(args)
 
-    cfg = build_config(toml_dict, env=env_dict, cli=cli_dict)
+    cfg = build_config(
+        toml_dict, env=env_dict, cli=cli_dict, allow_null_home=bool(getattr(args, "demo", False))
+    )
     cfg._args = args
     cfg._config_path = config_path
     cfg._file_layer = {k: dict(v) for k, v in toml_dict.items() if isinstance(v, dict)}

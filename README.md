@@ -46,6 +46,10 @@ adsbtui --url 192.0.2.10 --lat 37.7749 --lon -122.4194
 `--url` takes a receiver address (the usual `aircraft.json` paths are probed), an exact URL, or
 a local file such as `/run/readsb/aircraft.json`.
 
+No receiver yet? `adsbtui --demo` shows scripted traffic around your home position (or San
+Francisco if none is set). It needs no config and no network, never sends an alert, and writes
+nothing to disk. The status line says DEMO.
+
 ## Keys
 
 | Key | Action |

@@ -316,3 +316,16 @@ def test_a_smaller_radius_shows_before_the_next_poll(spawn):
     for _ in range(12):
         press(term, "-")
     term.wait_for(lambda t: re.search(r"\b[0-4] aircraft", t.text) is not None, timeout=3)
+
+
+# ------------------------------------------------------------------------------ G-D demo
+
+
+def test_demo_runs_with_no_config_no_network_and_writes_nothing(spawn, sandbox):
+    term = spawn(args=["--demo"], feed_args=False)
+    term.wait_for("DEMO")
+    term.wait_for("MAYDAY1")
+    press(term, "q")
+    assert term.wait_exit() == 0
+    written = [p for p in (sandbox / "home").rglob("*") if p.is_file()]
+    assert written == [], written
