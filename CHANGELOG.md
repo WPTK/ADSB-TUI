@@ -5,22 +5,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Fixed
-- **Feed data is validated at the boundary.** Every string from `aircraft.json` is matched
-  against its wire format (hex, squawk, category, type, emergency) or stripped of control
-  characters and capped; every number must be finite and physically plausible. Escape
-  sequences in a hex, squawk or registration no longer reach `--once` output, a NUL no
-  longer crashes the detail screen, and `1e999`/`Infinity` no longer takes out a whole tick.
-  Registry data gets the same treatment before it fills a row.
-- A bearing of 359.6 reads `000`, not `360`.
-- `--format csv` ends lines with `
-`, not `
-`, on Windows.
-- A CJK callsign fills its cell instead of wrapping the row: cells are measured in terminal
-  columns, not characters.
-
 ### Removed
-- `Aircraft.extra`, an unread copy of every raw record made on every tick.
 - **The current directory is no longer searched for `adsb-tui.toml`.** A config can set
   `alerts.command`, so a file in an untrusted directory could run a command.
 - **Six settings that did nothing are gone**: `display.theme`, `display.density` (and the
