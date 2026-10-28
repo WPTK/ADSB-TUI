@@ -255,6 +255,18 @@ def test_tick_is_deterministic_for_a_given_clock():
     assert later.aircraft == []
 
 
+def test_a_narrower_radius_drops_the_tracks_it_filters_out_at_once():
+    """Without the prune a filtered-out aircraft lingers for display.linger_s (A52)."""
+    pipe = _pipeline(_config(**{"display.linger_s": 30.0}))
+    payload = _feed(_plane("a1b2c1", 37.78), _plane("a1b2c2", 37.9))
+    assert len(pipe.tick(payload, 1000.0).aircraft) == 2
+    pipe.cfg.filter.radius = 5.0
+    still = pipe.tick(payload, 1001.0)
+    assert sorted(a.hex for a in still.aircraft) == ["a1b2c1", "a1b2c2"]  # lingering, is_lost
+    pipe.drop_filtered_lingerers()
+    assert [a.hex for a in pipe.tick(payload, 1002.0).aircraft] == ["a1b2c1"]
+
+
 # ----------------------------------------------------------------------------------
 # DispatchWorker (A23)
 # ----------------------------------------------------------------------------------

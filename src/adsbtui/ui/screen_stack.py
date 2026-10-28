@@ -102,6 +102,7 @@ class ScreenStack:
             f.min_alt_ft = int(result.get("min_alt_ft", f.min_alt_ft))
             f.max_alt_ft = int(result.get("max_alt_ft", f.max_alt_ft))
             view.search_text = str(result.get("search_text", view.search_text) or "")
+            self.effects.refresh_now()
         elif name == "columns":
             result = screen.result()
             display.columns = list(result.get("columns", display.columns))
@@ -109,6 +110,7 @@ class ScreenStack:
         elif name == "watchlist":
             entries = list(screen.result())
             self.effects.set_watch_entries(entries)
+            self.effects.refresh_now()
             if cfg.watchlist.path:
                 try:
                     watchlist_mod.save(cfg.watchlist.path, entries)
@@ -147,6 +149,7 @@ class ScreenStack:
         # Settings that feed long-lived objects have to be re-read, not just stored.
         self.effects.set_enricher()
         self.effects.set_dispatcher()
+        self.effects.refresh_now()
 
         if getattr(screen, "save_requested", False):
             error = self.effects.save_config(new_cfg, self.edited)
