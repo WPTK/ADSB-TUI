@@ -93,6 +93,11 @@ def grade(
         if aircraft.emergency is not None:
             return AlertLevel.EMERGENCY
 
+    # A stale or lingering-lost aircraft is a last-known position, not a present one, so it
+    # must not raise a proximity alert (only the emergency check above still applies).
+    if aircraft.is_stale or aircraft.is_lost:
+        return AlertLevel.NONE
+
     # 2. OVERHEAD: currently inside the proximity radius. An aircraft on the ground is not
     # overhead of anything; at an airport every taxiing aircraft would otherwise ring the
     # bell. It is graded NEARBY instead, which is displayed but never dispatched.
@@ -113,12 +118,13 @@ def grade(
     ):
         return AlertLevel.INBOUND
 
-    # 4. OUTBOUND: still within twice the proximity radius, and geo.closest_point_of_approach
-    # returned a cpa_distance_mi with no cpa_seconds -- that combination means the aircraft's
-    # closest approach on its current track is already behind it (a receding target), i.e. it
-    # was recently close and is now heading away rather than about to arrive.
+    # 4. OUTBOUND: still within twice the proximity radius, airborne, and
+    # geo.closest_point_of_approach returned a cpa_distance_mi with no cpa_seconds -- that
+    # combination means the closest approach on its current track is already behind it
+    # (a receding target), i.e. it is heading away rather than about to arrive.
     if (
-        aircraft.distance_mi is not None
+        not aircraft.on_ground
+        and aircraft.distance_mi is not None
         and aircraft.distance_mi <= proximity_mi * 2
         and aircraft.cpa_distance_mi is not None
         and aircraft.cpa_seconds is None

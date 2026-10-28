@@ -8,7 +8,6 @@ import textwrap
 from pathlib import Path
 
 import fakefeed
-import pytest
 from fakefeed import HOME_LAT, HOME_LON, ac
 from keys import press
 
@@ -61,7 +60,6 @@ def test_inbound_then_overhead_dispatches_an_event(spawn, feed, sandbox):
     term.wait_for(lambda t: log.exists() and "abc123 MOVER" in log.read_text("utf-8"))
 
 
-@pytest.mark.xfail(strict=True, reason="A06: OUTBOUND can never be reached from real data")
 def test_outbound_follows_overhead(spawn, feed):
     feed.script(
         fakefeed.ok(_flight_path([6, 3, 1, 3, 6, 9], track=0.0, gs=300.0)),
@@ -71,9 +69,6 @@ def test_outbound_follows_overhead(spawn, feed):
     term.wait_for("OUTBD", timeout=15)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="A07: a stale aircraft inside the radius is still dispatched"
-)
 def test_stale_aircraft_is_never_dispatched(spawn, feed, sandbox):
     env, log = _recorder(sandbox)
     feed.script(

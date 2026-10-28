@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from adsbtui.alerts import (
     classify_trend,
     decode_category,
@@ -262,3 +264,47 @@ class TestDecodeCategory:
 
     def test_none_is_none(self):
         assert decode_category(None) is None
+
+
+class TestStaleAndLostAircraft:
+    """A last-known position is not a present one: no proximity or CPA grade (A07)."""
+
+    @pytest.mark.parametrize("flag", ["is_stale", "is_lost"])
+    def test_stale_or_lost_inside_proximity_is_none(self, flag):
+        ac = make_aircraft(distance_mi=1.0, **{flag: True})
+        assert grade_default(ac, proximity_mi=5.0) == AlertLevel.NONE
+
+    @pytest.mark.parametrize("flag", ["is_stale", "is_lost"])
+    def test_stale_or_lost_inbound_is_none(self, flag):
+        ac = make_aircraft(
+            distance_mi=20.0, cpa_distance_mi=0.5, cpa_seconds=120.0, ground_speed_kt=300.0
+        )
+        setattr(ac, flag, True)
+        assert grade_default(ac) == AlertLevel.NONE
+
+    def test_a_stale_emergency_still_grades_emergency(self):
+        ac = make_aircraft(distance_mi=1.0, squawk="7700", is_stale=True)
+        assert grade_default(ac) == AlertLevel.EMERGENCY
+
+    def test_a_receding_aircraft_on_the_ground_is_not_outbound(self):
+        ac = make_aircraft(distance_mi=8.0, cpa_distance_mi=8.0, cpa_seconds=None, on_ground=True)
+        assert grade_default(ac, proximity_mi=5.0) == AlertLevel.NONE
+
+
+def test_real_geometry_reaches_outbound():
+    """7 mi north, heading north at 300 kt, through derive_geo and grade (A06)."""
+    from adsbtui.config import Config
+    from adsbtui.pipeline import derive_geo, grade_all
+
+    cfg = Config()
+    cfg.home.lat, cfg.home.lon = 37.7749, -122.4194
+    ac = make_aircraft(
+        lat=37.7749 + 7 / 69.0,
+        lon=-122.4194,
+        track_deg=0.0,
+        ground_speed_kt=300.0,
+        altitude_ft=5000.0,
+    )
+    derive_geo([ac], cfg)
+    grade_all([ac], cfg)
+    assert ac.alert_level == AlertLevel.OUTBOUND
