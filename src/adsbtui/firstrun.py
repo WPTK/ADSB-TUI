@@ -19,13 +19,17 @@ import os
 import sys
 
 from . import config_write
-from .config import Config, ConfigError, find_config_path, validate
+from .config import (
+    Config,
+    ConfigError,
+    default_config_path,
+    find_config_path,
+    load_toml,
+    validate,
+)
 from .ui.screens.setup import SetupScreen
 
 log = logging.getLogger("adsbtui")
-
-#: Where a config written by the wizard goes when the user has no config file at all.
-DEFAULT_CONFIG_PATH = "~/.config/adsbtui/config.toml"
 
 #: Flags that mean "this run is scripted": the caller wants output or an exit code, not a
 #: wizard, even on a terminal.
@@ -106,7 +110,7 @@ def run_setup(screen: SetupScreen | None = None) -> Config | None:
 
 def save_new_config(cfg: Config, path: str | None = None) -> str | None:
     """Persist a wizard-produced config. Returns the path written, or None on failure."""
-    target = os.path.expanduser(path or find_config_path(None) or DEFAULT_CONFIG_PATH)
+    target = os.path.expanduser(path or find_config_path(None) or default_config_path())
     try:
         config_write.dump_config(cfg, target)
     except OSError as exc:
@@ -148,6 +152,8 @@ def first_run(
     if written:
         print(f"Configuration saved to {written}")
         cfg._config_path = written
+        # The wizard wrote the whole config, so the whole config is now the file's layer.
+        cfg._file_layer = load_toml(written)
     else:
         print("Continuing with these settings, but they could not be saved.", file=sys.stderr)
     return cfg, written

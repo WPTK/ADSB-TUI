@@ -29,7 +29,6 @@ def test_changing_units_in_settings_applies_and_saves(spawn, sandbox):
     term.wait_for("5.3 mi", gone=True)
 
 
-@pytest.mark.xfail(strict=True, reason="A16: save writes CLI/env overrides into the file")
 def test_save_writes_only_the_file_layer_and_the_edit(spawn, sandbox):
     term = spawn()
     term.wait_for("UAL123")
@@ -41,9 +40,8 @@ def test_save_writes_only_the_file_layer_and_the_edit(spawn, sandbox):
     assert "127.0.0.1" not in saved  # the --url came from the command line
 
 
-@pytest.mark.xfail(strict=True, reason="A17: a failed save is only logged; the user sees nothing")
 def test_save_into_a_read_only_directory_shows_an_error(spawn, sandbox):
-    config_dir = sandbox / "home" / ".config" / "adsbtui"
+    config_dir = sandbox / "xdg-config" / "adsbtui"
     config_dir.mkdir(parents=True)
     config_dir.chmod(0o500)
     try:

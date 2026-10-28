@@ -37,9 +37,6 @@ def test_wizard_writes_a_config_and_shows_the_table(spawn, feed, sandbox):
     assert feed.url in written[0].read_text("utf-8")
 
 
-@pytest.mark.xfail(
-    strict=True, reason="A15: the wizard saves to ~/.config and ignores XDG_CONFIG_HOME"
-)
 def test_wizard_saves_where_the_loader_looks(spawn, feed, sandbox):
     term = spawn(100, 34, feed_args=False, wait_ready=False)
     _walk_the_wizard(term, feed)

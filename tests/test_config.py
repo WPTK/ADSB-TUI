@@ -363,3 +363,78 @@ class TestLoadConfig:
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "no-such-xdg-dir"))
         with pytest.raises(ConfigError):
             load_config(["--lat", "1.0", "--lon", "1.0"])
+
+
+# ----------------------------------------------------------------------------------
+# Provenance: what a save writes (A15, A16)
+# ----------------------------------------------------------------------------------
+
+
+class TestProvenance:
+    def _loaded(self, tmp_path, monkeypatch, toml_text, env=None, argv=()):
+        path = tmp_path / "adsbtui" / "config.toml"
+        path.parent.mkdir()
+        path.write_text(toml_text, "utf-8")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+        for key, value in (env or {}).items():
+            monkeypatch.setenv(key, value)
+        return path, load_config(list(argv))
+
+    FILE = '[source]\nurl = "http://file/aircraft.json"\n[home]\nlat = 37.7\nlon = -122.4\n'
+
+    def test_default_path_honours_xdg_and_matches_what_the_loader_finds(
+        self, tmp_path, monkeypatch
+    ):
+        from adsbtui.config import default_config_path
+
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+        path = default_config_path()
+        assert path == str(tmp_path / "adsbtui" / "config.toml")
+        Path(path).parent.mkdir()
+        Path(path).write_text("", "utf-8")
+        assert find_config_path(None) == path
+
+    def test_cli_and_env_overrides_stay_out_of_the_saved_layer(self, tmp_path, monkeypatch):
+        from adsbtui.config import layer_for_save
+
+        _, cfg = self._loaded(
+            tmp_path,
+            monkeypatch,
+            self.FILE,
+            env={"ADSBTUI_ALERTS_WEBHOOK_URL": "https://secret.example/hook"},
+            argv=["--url", "http://cli/aircraft.json"],
+        )
+        assert cfg.source.url == "http://cli/aircraft.json"
+        layer = layer_for_save(cfg._file_layer, cfg, set())
+        assert layer["source"]["url"] == "http://file/aircraft.json"
+        assert "alerts" not in layer
+
+    def test_edited_keys_are_written_even_when_a_cli_flag_set_them(self, tmp_path, monkeypatch):
+        from adsbtui.config import layer_for_save
+
+        _, cfg = self._loaded(tmp_path, monkeypatch, self.FILE, argv=["--radius", "9"])
+        cfg.filter.radius = 21.0
+        layer = layer_for_save(cfg._file_layer, cfg, {("filter", "radius")})
+        assert layer["filter"] == {"radius": 21.0}
+
+    def test_retired_keys_are_dropped_on_save(self, tmp_path, monkeypatch):
+        from adsbtui.config import layer_for_save
+
+        _, cfg = self._loaded(tmp_path, monkeypatch, self.FILE + '[display]\ntheme = "x"\n')
+        assert "display" not in layer_for_save(cfg._file_layer, cfg, set())
+
+    def test_changed_keys_names_exactly_what_differs(self):
+        from adsbtui.config import changed_keys
+
+        a, b = Config(), Config()
+        b.filter.radius = 99.0
+        b.display.units = "metric"
+        assert changed_keys(a, b) == {("filter", "radius"), ("display", "units")}
+
+    def test_a_newer_schema_is_refused(self):
+        with pytest.raises(ConfigError, match="newer"):
+            build_config({"schema": 99, "source": {"url": "x"}, "home": {"lat": 1.0, "lon": 1.0}})
+
+    def test_the_current_schema_is_accepted(self):
+        cfg = build_config({"schema": 1, "source": {"url": "x"}, "home": {"lat": 1.0, "lon": 1.0}})
+        assert cfg.source.url == "x"
