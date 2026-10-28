@@ -1,0 +1,75 @@
+"""U11 settings, U12 data and registry."""
+
+from __future__ import annotations
+
+import pytest
+from keys import press
+
+
+def test_settings_open_and_cancel(spawn):
+    term = spawn()
+    term.wait_for("UAL123")
+    for opener in (",", "f2"):
+        press(term, opener)
+        term.wait_for("Source")
+        press(term, "esc")
+        term.wait_for("Refresh (s)", gone=True)
+
+
+def test_changing_units_in_settings_applies_and_saves(spawn, sandbox):
+    term = spawn()
+    term.wait_for("5.3 mi")
+    press(term, ",")
+    term.wait_for("Refresh (s)")
+    press(term, "tab", "tab", "tab")  # Source -> Home -> Filter -> Display
+    term.wait_for("Units")
+    press(term, "right")  # imperial -> next system
+    press(term, "f2")  # apply and save
+    term.wait_for("Refresh (s)", gone=True)
+    term.wait_for("5.3 mi", gone=True)
+
+
+@pytest.mark.xfail(strict=True, reason="A16: save writes CLI/env overrides into the file")
+def test_save_writes_only_the_file_layer_and_the_edit(spawn, sandbox):
+    term = spawn()
+    term.wait_for("UAL123")
+    press(term, ",")
+    term.wait_for("Refresh (s)")
+    press(term, "f2")
+    term.wait_for("Refresh (s)", gone=True)
+    saved = next(sandbox.rglob("config.toml")).read_text("utf-8")
+    assert "127.0.0.1" not in saved  # the --url came from the command line
+
+
+@pytest.mark.xfail(strict=True, reason="A17: a failed save is only logged; the user sees nothing")
+def test_save_into_a_read_only_directory_shows_an_error(spawn, sandbox):
+    config_dir = sandbox / "home" / ".config" / "adsbtui"
+    config_dir.mkdir(parents=True)
+    config_dir.chmod(0o500)
+    try:
+        term = spawn()
+        term.wait_for("UAL123")
+        press(term, ",")
+        term.wait_for("Refresh (s)")
+        press(term, "f2")
+        term.wait_for("could not save", timeout=5)
+    finally:
+        config_dir.chmod(0o700)
+
+
+def test_data_screen_reports_an_empty_registry(spawn):
+    term = spawn()
+    term.wait_for("UAL123")
+    for opener in ("D", "f8"):
+        press(term, opener)
+        term.wait_for("Aircraft registry sources")
+        assert "not downloaded" in term.text
+        press(term, "esc")
+        term.wait_for("Aircraft registry sources", gone=True)
+
+
+@pytest.mark.skip(
+    reason="needs the registry URL seam and fake registry from Meeting 1 PR 10 (A26-A28)"
+)
+def test_manual_update_from_a_fake_registry(spawn):
+    raise AssertionError("unreachable")

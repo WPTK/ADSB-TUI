@@ -14,13 +14,13 @@ dependencies = []
 
 [project.optional-dependencies]
 windows = ["windows-curses>=2.3"]
-dev = ["pytest>=8", "ruff>=0.6", "hypothesis>=6.100"]
+dev = ["pytest>=8", "ruff>=0.6", "hypothesis>=6.100", "pyte>=0.8.2", "coverage>=7.10", "pytest-xdist>=3"]
 
 [project.scripts]
 adsbtui = "adsbtui.__main__:main"
 
 [tool.hatch.build.targets.sdist]
-exclude = ["docs/screenshots", "AUDIT.md", "/adsbtui.py"]
+exclude = ["docs/screenshots", "AUDIT.md"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/adsbtui"]
@@ -35,3 +35,16 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+# The UAT layer launches the real program in a pty; it has its own CI job (pytest -m uat).
+addopts = "-m 'not uat'"
+markers = ["uat: out-of-process terminal tests (pty + pyte); POSIX only"]
+
+[tool.coverage.run]
+branch = true
+source_pkgs = ["adsbtui"]
+parallel = true
+patch = ["subprocess"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
