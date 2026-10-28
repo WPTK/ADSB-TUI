@@ -12,7 +12,7 @@ import time
 import fakefeed
 import pytest
 from fakefeed import HOME_LAT, HOME_LON, ac
-from keys import press, selected_hex
+from keys import order, press, selected_hex
 
 from adsbtui.ui.keys import BINDINGS
 
@@ -89,9 +89,11 @@ def test_every_other_key_acts(spawn):
     term.wait_for("range 15 mi")
 
     # Reverse: S flips the order
-    term.wait_for(lambda t: t.find("UAL123")[1] < t.find("SKW4455")[1])
+    # Both rows must be on screen before their order means anything (find() is None mid-redraw).
+    pair = ["UAL123", "SKW4455"]
+    term.wait_for(lambda t: order(t, pair) == pair)
     press(term, "S")
-    term.wait_for(lambda t: t.find("UAL123")[1] > t.find("SKW4455")[1])
+    term.wait_for(lambda t: order(t, pair) == pair[::-1])
 
 
 @pytest.mark.parametrize("key", ["q", "Q", "f10"])
