@@ -343,3 +343,33 @@ def test_the_poll_period_is_refresh_s_not_fetch_time_plus_refresh_s():
     gaps = [b - a for a, b in zip(stamps, stamps[1:], strict=False)]
     assert len(gaps) >= 3
     assert all(g < 0.55 for g in gaps), gaps  # 0.25 + 0.4 = 0.65 under the old scheme
+
+
+# ----------------------------------------------------------------------------------
+# stale feed (A08)
+# ----------------------------------------------------------------------------------
+
+
+def test_a_frozen_feed_is_reported_stale_after_stale_s():
+    pipe = _pipeline(_config(**{"source.stale_s": 30.0}))
+    payload = _feed(_plane("a1b2c1", 37.78))
+    assert not pipe.tick(payload, 1000.0).feed_stale
+    assert not pipe.tick(payload, 1020.0).feed_stale  # same `now`, but within stale_s
+    late = pipe.tick(payload, 1031.0)
+    assert late.feed_stale
+    assert all(ac.is_stale for ac in late.aircraft)
+
+
+def test_an_advancing_feed_is_never_stale():
+    pipe = _pipeline(_config(**{"source.stale_s": 30.0}))
+    for i in range(5):
+        payload = {**_feed(_plane("a1b2c1", 37.78)), "now": 1000.0 + i * 100}
+        assert not pipe.tick(payload, 1000.0 + i * 100).feed_stale
+
+
+def test_a_feed_that_resumes_stops_being_stale():
+    pipe = _pipeline(_config(**{"source.stale_s": 30.0}))
+    payload = _feed(_plane("a1b2c1", 37.78))
+    pipe.tick(payload, 1000.0)
+    assert pipe.tick(payload, 1100.0).feed_stale
+    assert not pipe.tick({**payload, "now": 1101.0}, 1101.0).feed_stale

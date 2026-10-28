@@ -146,13 +146,13 @@ class TestClosestPointOfApproach:
         assert d_cpa == pytest.approx(0.0, abs=1e-6)
         assert t_cpa > 0.0
 
-    def test_flying_directly_away_returns_none(self):
+    def test_flying_directly_away_returns_current_distance_and_no_time(self):
         # Same geometry, but heading further away (due north) instead of at home.
         ac_lat, ac_lon = self.HOME_LAT + 0.1, self.HOME_LON
         d_cpa, t_cpa = closest_point_of_approach(
             self.HOME_LAT, self.HOME_LON, ac_lat, ac_lon, track_deg=0.0, ground_speed_kt=120.0
         )
-        assert d_cpa is None
+        assert d_cpa == pytest.approx(6.9, abs=0.1)  # 0.1 degree of latitude
         assert t_cpa is None
 
     def test_missing_ground_speed_returns_none(self):

@@ -295,6 +295,7 @@ class App:
         #: who wants the full width for the table.
         self._radar_on = True
         self._search_text = ""
+        self._feed_stale = False
         self._cursor = 0
         self._scroll = 0
         self._screen = None
@@ -408,6 +409,7 @@ class App:
                 result = self._pipeline.tick(raw, self._clock(), self._search_text)
                 display = self.cfg.display
                 ordered = sort_aircraft(result.aircraft, display.sort_key, display.sort_reverse)
+                self._feed_stale = result.feed_stale
                 self._publish(out_queue, (result.snapshot, ordered, None))
                 backoff = BACKOFF_BASE_S
                 stop_event.wait(max(0.0, due - time.monotonic()))
@@ -589,8 +591,10 @@ class App:
             paused=paused,
             clock=time.strftime("%H:%M:%S"),
             note=self._registry_status,
+            feed_stale=self._feed_stale,
         )
-        status_attr = self._attrs.get("ok" if last_error is None else "bad", header_attr)
+        bad = last_error is not None or self._feed_stale
+        status_attr = self._attrs.get("bad" if bad else "ok", header_attr)
         self._safe_addstr(stdscr, 0, 0, status, status_attr)
 
         border_style = display.borders

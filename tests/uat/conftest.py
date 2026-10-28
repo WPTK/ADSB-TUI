@@ -55,6 +55,7 @@ def child_env(sandbox: Path, extra: dict[str, str | None] | None = None) -> dict
         # Fast polling so a scripted fault shows up in well under a second.
         "ADSBTUI_SOURCE_REFRESH_S": "0.3",
         "ADSBTUI_SOURCE_TIMEOUT_S": "2",
+        "ADSBTUI_SOURCE_STALE_S": "3",
     }
     # Subprocess coverage (see the uat CI job): the interpreter's .pth hook reads these.
     for passthrough in ("COVERAGE_PROCESS_START", "COVERAGE_FILE"):

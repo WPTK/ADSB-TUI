@@ -30,7 +30,6 @@ def test_fault_shows_a_banner_keeps_the_list_and_recovers(spawn, feed, name):
     term.wait_for("NO DATA", gone=True)
 
 
-@pytest.mark.xfail(strict=True, reason="A08: a frozen feed (static `now`) still shows LIVE")
 def test_frozen_feed_is_reported_stale(spawn, feed):
     term = spawn()
     term.wait_for("LIVE")

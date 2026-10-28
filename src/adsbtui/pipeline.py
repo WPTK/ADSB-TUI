@@ -47,6 +47,9 @@ class TickResult:
     closed_tracks: int
     error: SourceError | None = None
     snapshot: Snapshot | None = None
+    #: True when the feed's own `now` has not advanced for source.stale_s (a dead decoder
+    #: behind a web server that still answers).
+    feed_stale: bool = False
 
 
 # --------------------------------------------------------------------------------------
@@ -229,6 +232,9 @@ class Pipeline:
         #: hex -> running per-track aggregates, written out when the track closes.
         self._track_stats: dict[str, dict[str, Any]] = {}
         self._history_db = open_history(cfg, self._logger)
+        #: The feed's last distinct `now` and the tick time it first appeared.
+        self._feed_now: float | None = None
+        self._feed_changed_at: float | None = None
 
     def tick(self, raw: Any, now: float, search_text: str = "") -> TickResult:
         """Run one cycle over an already-fetched payload and return what happened."""
@@ -250,12 +256,27 @@ class Pipeline:
             stale_after_s=self.cfg.display.stale_after_s,
             linger_s=self.cfg.display.linger_s,
         )
+        feed_stale = self._feed_is_stale(snapshot, now)
         graded = list(self._tracked.values())
+        for ac in graded:
+            ac.is_stale = ac.is_stale or feed_stale
         grade_all(graded, self.cfg)
 
         events = self._dispatch_alerts(graded)
         closed = self._record_tracks(self._tracked, now)
-        return TickResult(graded, events, closed, snapshot=snapshot)
+        return TickResult(graded, events, closed, snapshot=snapshot, feed_stale=feed_stale)
+
+    def _feed_is_stale(self, snapshot: Snapshot, now: float) -> bool:
+        """Whether the feed's `now` has stood still for longer than source.stale_s.
+
+        Compared against its own previous value rather than the wall clock, so a receiver
+        with a skewed clock is not reported stale.
+        """
+        if snapshot.now != self._feed_now or self._feed_changed_at is None:
+            self._feed_now = snapshot.now
+            self._feed_changed_at = now
+            return False
+        return (now - self._feed_changed_at) > self.cfg.source.stale_s
 
     def _dispatch_alerts(self, graded: list[Aircraft]) -> list[dispatch.AlertEvent]:
         """Build an event for each alert-level transition and watchlist hit, and notify.

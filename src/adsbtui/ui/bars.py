@@ -47,6 +47,7 @@ def status_line_text(
     paused: bool = False,
     clock: str | None = None,
     note: str | None = None,
+    feed_stale: bool = False,
 ) -> str:
     """Build the one live-state line: link health, what is on screen, and any running job.
 
@@ -65,7 +66,7 @@ def status_line_text(
 
     if source_ok:
         age = _format_duration(last_success_age_s) if last_success_age_s is not None else ""
-        parts.append(f"LIVE {age}".strip())
+        parts.append(f"{'STALE FEED' if feed_stale else 'LIVE'} {age}".strip())
     else:
         failed = "NO DATA"
         if source_message:
