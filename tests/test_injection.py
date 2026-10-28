@@ -20,7 +20,7 @@ from adsbtui.normalize import parse_aircraft
 from adsbtui.sources.jsonfile import FileSource
 from adsbtui.textwidth import display_width
 from adsbtui.ui import columns as columns_mod
-from adsbtui.ui.app import App
+from adsbtui.ui import render
 from adsbtui.ui.screens.detail import DetailScreen
 
 ATTACKS = {
@@ -151,7 +151,7 @@ class _Window:
 
 
 def test_safe_addstr_swallows_an_embedded_nul():
-    App._safe_addstr(None, _Window(), 0, 0, "a\x00b")  # type: ignore[arg-type]
+    render._safe_addstr(_Window(), 0, 0, "a\x00b")
 
 
 def test_csv_lines_end_in_a_bare_newline():
