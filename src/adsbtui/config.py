@@ -27,6 +27,8 @@ from dataclasses import MISSING, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
+from . import __version__
+
 
 class ConfigError(Exception):
     """Raised for any configuration problem: a malformed file, or a value that fails
@@ -503,6 +505,7 @@ def build_argparser() -> argparse.ArgumentParser:
         description="A curses TUI for tracking nearby aircraft from a dump1090/readsb ADS-B feed.",
     )
 
+    parser.add_argument("--version", action="version", version=f"adsbtui {__version__}")
     parser.add_argument("--config", default=None, help="path to a TOML config file")
     parser.add_argument("--url", default=None, help="aircraft.json source: URL or file path")
     parser.add_argument("--lat", type=float, default=None, help="home latitude")
