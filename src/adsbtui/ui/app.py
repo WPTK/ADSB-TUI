@@ -51,12 +51,11 @@ from adsbtui import (
 from adsbtui import watchlist as watchlist_mod
 from adsbtui.config import Config, changed_keys, default_config_path, layer_for_save
 from adsbtui.enrich import registry_update
-from adsbtui.model import Aircraft, AlertLevel
+from adsbtui.model import Aircraft
 from adsbtui.sources import Source, SourceError
-from adsbtui.ui import bars, radar, theme
-from adsbtui.ui import columns as columns_mod
 from adsbtui.ui.frame import Frame
-from adsbtui.ui.keys import ACTION_FOR_KEY, BAR_KEYMAP, HELP_KEYMAP
+from adsbtui.ui.keys import ACTION_FOR_KEY, HELP_KEYMAP
+from adsbtui.ui.render import Renderer, layout_for
 from adsbtui.ui.screens.columns import ColumnsScreen
 from adsbtui.ui.screens.data import DataScreen, make_updater
 from adsbtui.ui.screens.detail import DetailScreen
@@ -68,12 +67,6 @@ from adsbtui.ui.screens.watchlist import WatchlistScreen
 from adsbtui.ui.sorting import SORT_KEYS, sort_aircraft
 from adsbtui.ui.view import ViewState
 
-#: Below this width or height, the normal table layout is abandoned for a single centered
-#: "Terminal too small" message -- there simply is not room to draw anything useful, and
-#: attempting to would just produce a wall of curses.error-guarded no-ops.
-MIN_WIDTH = 40
-MIN_HEIGHT = 8
-
 #: getch() timeout in milliseconds. Must be <= 250 per the task's requirement so the UI
 #: stays responsive to the quit key; kept comfortably under that ceiling.
 GETCH_TIMEOUT_MS = 200
@@ -81,18 +74,6 @@ GETCH_TIMEOUT_MS = 200
 #: The first term (and the reset value) of the fetch thread's exponential backoff sequence
 #: (1, 2, 4, 8, ... capped at cfg.source.backoff_max_s) used after a failed fetch.
 BACKOFF_BASE_S = 1.0
-
-#: Fixed rows around the aircraft table: the status line, the column header and its
-#: divider above; the key bar below.
-_TOP_ROWS = 3
-
-#: Scope geometry. The scope only appears once the terminal is wide enough for it AND a
-#: readable table, and it is capped so a very wide terminal spends the extra width on
-#: aircraft data rather than an enormous circle.
-RADAR_MIN_TOTAL_WIDTH = 110
-RADAR_MIN_WIDTH = 24
-RADAR_MAX_WIDTH = 44
-RADAR_GAP = 2
 
 _LOGGER_NAME = "adsbtui"
 
@@ -153,7 +134,7 @@ class App:
         self._registry_thread: threading.Thread | None = None
         self._registry_done = threading.Event()
 
-        self._attrs: dict[str, int] = {}
+        self.renderer = Renderer(lambda: self.cfg.display)
 
         # --- watchlist, alert dispatch, sighting history ---------------------------
         watch_entries: list[watchlist_mod.WatchEntry] = []
@@ -177,11 +158,6 @@ class App:
         )
 
         self._frame_seq = 0
-        #: Per-update draw caches (A22). The aircraft list is replaced once per fetch, but
-        #: the screen is redrawn every second and on every key; the table rows and the
-        #: radar plot only change when the list, the layout or the scope settings do.
-        self._row_cache: tuple[object, list[Aircraft], dict[int, str]] | None = None
-        self._scope_cache: tuple[list[Aircraft], object, radar.Scope] | None = None
         #: (section, key) pairs edited in Settings this session; saved with the file layer.
         self._edited: set[tuple[str, str]] = set()
 
@@ -376,295 +352,32 @@ class App:
         with contextlib.suppress(queue.Full):
             out_queue.put_nowait(item)
 
-    # ------------------------------------------------------------------
-    # Curses setup
-    # ------------------------------------------------------------------
+    @property
+    def _attrs(self) -> dict[str, int]:
+        return self.renderer.attrs
 
-    def _build_attrs(self) -> dict[str, int]:
-        """Resolve ui.theme's semantic RowStyles to real curses attributes, once.
+    @_attrs.setter
+    def _attrs(self, value: dict[str, int]) -> None:
+        self.renderer.attrs = value
 
-        Falls back to bold/reverse/dim-only attributes (no color) when colors are
-        unavailable or cfg.display.color is "never". Every curses color call is guarded --
-        some terminals advertise color support but still fail start_color()/init_pair().
-        """
-        color_ok = False
-        # Background used for every color pair: -1 (the terminal's own default background,
-        # so colored rows still ride on whatever background the user's terminal theme sets)
-        # when use_default_colors() is available, else an explicit black as a fallback.
-        pair_bg = curses.COLOR_BLACK
-        # NO_COLOR (no-color.org): a non-empty value turns "auto" off; an explicit
-        # "always" in the config still wins.
-        no_color = self.cfg.display.color == "auto" and bool(os.environ.get("NO_COLOR"))
-        if self.cfg.display.color != "never" and not no_color:
-            try:
-                curses.start_color()
-                try:
-                    curses.use_default_colors()
-                    pair_bg = -1
-                except curses.error:
-                    pair_bg = curses.COLOR_BLACK
-                color_ok = curses.has_colors()
-            except curses.error:
-                color_ok = False
-
-        # Every color name theme.ROW_STYLES can use must appear here: a name that is
-        # missing silently falls back to the terminal's default foreground, which is how
-        # the scope's rings ended up uncolored the first time.
-        color_map = {
-            "cyan": curses.COLOR_CYAN,
-            "yellow": curses.COLOR_YELLOW,
-            "red": curses.COLOR_RED,
-            "magenta": curses.COLOR_MAGENTA,
-            "green": curses.COLOR_GREEN,
-            "blue": curses.COLOR_BLUE,
-            "white": curses.COLOR_WHITE,
-        }
-
-        max_pairs = getattr(curses, "COLOR_PAIRS", 0)
-        attrs: dict[str, int] = {}
-        pair_id = 1
-        for name, style in theme.ROW_STYLES.items():
-            attr = curses.A_NORMAL
-            if style.bold:
-                attr |= curses.A_BOLD
-            if style.reverse:
-                attr |= curses.A_REVERSE
-            if style.dim:
-                attr |= curses.A_DIM
-
-            # "default" rides on the terminal's own foreground -- no color pair needed.
-            if color_ok and style.fg in color_map and pair_id < max_pairs:
-                try:
-                    curses.init_pair(pair_id, color_map[style.fg], pair_bg)
-                    attr |= curses.color_pair(pair_id)
-                    pair_id += 1
-                except curses.error:
-                    pass
-
-            attrs[name] = attr
-
-        return attrs
-
-    # ------------------------------------------------------------------
-    # Drawing -- main thread only.
-    # ------------------------------------------------------------------
-
-    def _safe_addstr(self, stdscr, y: int, x: int, text: str, attr: int = 0) -> None:
-        """Write one string to the screen, swallowing curses.error and ValueError (an embedded NUL).
-
-        Every draw call in this module routes through here so that writing to the
-        bottom-right cell, or any other addstr() failure on a too-small/narrow terminal,
-        never crashes the program -- it just skips that one piece of text.
-        """
-        with contextlib.suppress(curses.error, ValueError):
-            stdscr.addstr(y, x, text, attr)
-
-    def _row_style_name(self, ac: Aircraft) -> str:
-        """Pick a row style: status first, altitude band as the resting state.
-
-        Anything the user needs to react to (an emergency, something overhead, a watched
-        aircraft) outranks decoration. Everything else is colored by altitude band, so an
-        ordinary screenful still carries information instead of being a wall of one color.
-        """
-        if ac.alert_level == AlertLevel.EMERGENCY:
-            return "emergency"
-        if ac.is_military:
-            return "military"
-        if ac.is_watched:
-            return "watchlist"
-        if ac.alert_level == AlertLevel.OVERHEAD:
-            return "overhead"
-        if ac.alert_level in (AlertLevel.INBOUND, AlertLevel.OUTBOUND):
-            return "inbound"
-        if ac.is_stale:
-            return "stale"
-        return theme.altitude_style(ac.altitude_ft, ac.on_ground)
-
-    def _radar_width(self, width: int) -> int:
-        """Columns to give the scope, or 0 when it is off or the terminal is too narrow.
-
-        The table needs most of the width to stay readable, so the scope only appears once
-        there is genuinely room for both -- squeezing them together would make the table
-        drop columns to pay for a scope too small to read.
-        """
-        if not self._radar_on or width < RADAR_MIN_TOTAL_WIDTH:
-            return 0
-        return min(RADAR_MAX_WIDTH, max(RADAR_MIN_WIDTH, width // 3))
-
-    def _draw(
-        self,
-        stdscr,
-        aircraft_list: list[Aircraft],
-        last_error: str | None,
-        last_success_at: float | None,
-        paused: bool,
-    ) -> None:
-        height, width = stdscr.getmaxyx()
-        stdscr.erase()
-
-        if width < MIN_WIDTH or height < MIN_HEIGHT:
-            msg = "Terminal too small"[: max(0, width)]
-            y = max(0, height // 2)
-            x = max(0, (width - len(msg)) // 2)
-            self._safe_addstr(stdscr, y, x, msg, self._attrs.get("emergency", curses.A_BOLD))
-            stdscr.noutrefresh()
-            curses.doupdate()
-            return
-
-        display = self.cfg.display
+    def _paint(self, stdscr) -> None:
+        """Lay out, keep the cursor in view, and draw ``self.view``."""
         view = self.view
-        normal_attr = self._attrs.get("normal", curses.A_NORMAL)
-        header_attr = self._attrs.get("header", curses.A_BOLD)
+        view.registry_note = self._registry_status
+        layout = layout_for(*reversed(stdscr.getmaxyx()), view)
+        if not layout.too_small:
+            view.clamp(len(view.rows), layout.table_height)
+        self.renderer.draw(stdscr, view, layout)
 
-        # Row 0 is live state, the bottom row is the key hints, and everything between is
-        # the actual content. Nothing on screen spends a row on things that never change.
-        age = None if last_success_at is None else max(0.0, view.now - last_success_at)
-        alert_count = sum(
-            1 for ac in aircraft_list if ac.alert_level not in (AlertLevel.NONE, AlertLevel.NEARBY)
-        )
-        status = bars.status_line_text(
-            width,
-            source_ok=last_error is None,
-            source_message=last_error,
-            last_success_age_s=age,
-            aircraft_count=len(aircraft_list),
-            alert_count=alert_count,
-            msg_rate=view.msg_rate,
-            paused=paused,
-            clock=view.clock_text(),
-            note=self._current_note(),
-            feed_stale=view.feed_stale,
-        )
-        bad = last_error is not None or view.feed_stale
-        status_attr = self._attrs.get("bad" if bad else "ok", header_attr)
-        self._safe_addstr(stdscr, 0, 0, status, status_attr)
-
-        border_style = display.borders
-        ascii_only = border_style == "ascii"
-
-        radar_width = self._radar_width(width)
-        table_width = width - radar_width - (RADAR_GAP if radar_width else 0)
-
-        columns = columns_mod.layout(display.columns, table_width, display.owner_width)
-        widths = columns_mod.compute_widths(columns, table_width, display.owner_width)
-
-        header_line = columns_mod.format_header(columns, widths, border_style)
-        self._safe_addstr(stdscr, 1, 0, header_line[:table_width], header_attr)
-
-        divider_char = theme.glyphs(border_style)["h"] or "-"
-        self._safe_addstr(stdscr, 2, 0, divider_char * table_width, self._attrs.get("chrome", 0))
-
-        table_top = 3
-        table_height = max(0, height - table_top - 1)
-
-        # Keep the cursor inside the list and the viewport around the cursor, so the table
-        # scrolls instead of silently hiding everything past the first screenful.
-        self._clamp_view(len(aircraft_list), table_height)
-        visible = aircraft_list[self._scroll : self._scroll + table_height]
-
-        row_key = (tuple(widths), tuple(columns), display.units, ascii_only)
-        if (
-            self._row_cache is None
-            or self._row_cache[0] != row_key
-            or self._row_cache[1] is not aircraft_list
-        ):
-            self._row_cache = (row_key, aircraft_list, {})
-        row_texts = self._row_cache[2]
-
-        for i, ac in enumerate(visible):
-            index = self._scroll + i
-            row_text = row_texts.get(index)
-            if row_text is None:
-                row_text = columns_mod.format_row(ac, columns, widths, display.units, ascii_only)
-                row_texts[index] = row_text
-            if self._scroll + i == self._cursor and aircraft_list:
-                attr = self._attrs.get("selected", curses.A_REVERSE)
-            else:
-                attr = self._attrs.get(self._row_style_name(ac), normal_attr)
-            self._safe_addstr(stdscr, table_top + i, 0, row_text[:table_width], attr)
-
-        if radar_width:
-            self._draw_radar(
-                stdscr,
-                aircraft_list,
-                left=table_width + RADAR_GAP,
-                top=1,
-                width=radar_width,
-                height=height - 2,
-                ascii_only=ascii_only,
-            )
-
-        key_line = bars.key_bar_text(width, BAR_KEYMAP)
-        self._safe_addstr(stdscr, height - 1, 0, key_line, self._attrs.get("chrome", normal_attr))
-
-        if self._screen is not None:
-            self._draw_screen_overlay(stdscr, width, height)
-
-        stdscr.noutrefresh()
-        curses.doupdate()
-
-    def _draw_radar(
-        self,
-        stdscr,
-        aircraft_list: list[Aircraft],
-        left: int,
-        top: int,
-        width: int,
-        height: int,
-        ascii_only: bool,
-    ) -> None:
-        """Draw the scope pane: a bordered box with the PPI inside and a range caption.
-
-        Cells are drawn one at a time because each carries its own style -- a ring dot, a
-        compass tick and an emergency contact land in the same row and must not share an
-        attribute.
-        """
-        if width < 8 or height < 5:
-            return
-
-        chrome = self._attrs.get("chrome", 0)
-
-        selected = self._selected_aircraft(aircraft_list)
-        # The scope can only be as tall as its width allows once the 2:1 cell aspect is
-        # applied; asking for more just pads it with blank rows and strands the caption
-        # far below the rings.
-        scope_h = min(height - 2, int(width * radar.ASPECT) + 2)
-        scope_key = (
-            width,
-            scope_h,
-            self.cfg.filter.radius,
-            selected.hex if selected else None,
-            ascii_only,
-        )
-        cached = self._scope_cache
-        if cached is not None and cached[0] is aircraft_list and cached[1] == scope_key:
-            scope = cached[2]
-        else:
-            scope = radar.render(
-                aircraft_list,
-                width=width,
-                height=scope_h,
-                range_mi=self.cfg.filter.radius,
-                selected_hex=selected.hex if selected else None,
-                ascii_only=ascii_only,
-            )
-            self._scope_cache = (aircraft_list, scope_key, scope)
-
-        for row_index, line in enumerate(scope.lines):
-            styles = scope.styles[row_index]
-            for col_index, char in enumerate(line):
-                if char == " ":
-                    continue
-                attr = self._attrs.get(styles[col_index], 0)
-                self._safe_addstr(stdscr, top + row_index, left + col_index, char, attr)
-
-        caption = radar.range_label(self.cfg.filter.radius, self._distance_unit_label())
-        self._safe_addstr(stdscr, top + scope.height, left, caption[:width].center(width), chrome)
-
-    def _distance_unit_label(self) -> str:
-        return {"imperial": "mi", "metric": "km", "aviation": "nm"}.get(
-            self.cfg.display.units, "mi"
-        )
+    def _draw(self, stdscr, aircraft_list, last_error, last_success_at, paused) -> None:
+        """Draw explicit data by putting it in the view first; goes with the call sites in B2-6."""
+        view = self.view
+        view.rows, view.paused = aircraft_list, paused
+        if last_error != view.error:
+            view.frame = Frame(0, view.now, None, [], last_error, False)
+        if view.last_ok is None and last_success_at is not None:
+            view.last_ok = Frame(0, last_success_at, None, aircraft_list, None, False)
+        self._paint(stdscr)
 
     def _page_size(self, stdscr) -> int:
         """Rows of table visible right now, for PageUp/PageDown."""
@@ -673,50 +386,6 @@ class App:
 
     def _clamp_view(self, total: int, table_height: int) -> None:
         self.view.clamp(total, table_height)
-
-    def _draw_screen_overlay(self, stdscr, width: int, height: int) -> None:
-        """Draw the active screen centered over the table, inside a bordered box.
-
-        The screen itself only produces plain strings (that is what makes every screen
-        unit-testable without a terminal); all the curses geometry lives here.
-        """
-        screen = self._screen
-        if screen is None:
-            return
-
-        # 96 rather than 76: the help screen's column glossary and the settings screen's
-        # help text are both written as sentences, and clipping them mid-word on a wide
-        # terminal wasted room that was sitting right there.
-        box_w = max(20, min(width - 4, 96))
-        inner_w = box_w - 4
-        # The box itself can hold height-4 body rows (two borders, and box_h below adds two
-        # rows of padding), so asking a screen for height-8 threw away four usable rows and
-        # made long screens drop content that would have fitted.
-        lines = screen.render_lines(inner_w, max(1, height - 6))
-        box_h = min(height - 2, len(lines) + 4)
-        top = max(0, (height - box_h) // 2)
-        left = max(0, (width - box_w) // 2)
-
-        glyph = theme.glyphs(self.cfg.display.borders)
-        h, v = glyph.get("h") or "-", glyph.get("v") or "|"
-        tl = glyph.get("tl") or "+"
-        tr = glyph.get("tr") or "+"
-        bl = glyph.get("bl") or "+"
-        br = glyph.get("br") or "+"
-        border_attr = self._attrs.get("header", curses.A_BOLD)
-        body_attr = self._attrs.get("normal", curses.A_NORMAL)
-
-        title = f" {screen.title} "[: max(0, box_w - 4)]
-        top_line = tl + h + title + h * max(0, box_w - 3 - len(title)) + tr
-        self._safe_addstr(stdscr, top, left, top_line[:box_w], border_attr)
-
-        for i in range(box_h - 2):
-            text = lines[i] if i < len(lines) else ""
-            row = v + " " + text.ljust(inner_w)[:inner_w] + " " + v
-            self._safe_addstr(stdscr, top + 1 + i, left, row[:box_w], body_attr)
-
-        bottom_line = (bl + h * (box_w - 2) + br)[:box_w]
-        self._safe_addstr(stdscr, top + box_h - 1, left, bottom_line, border_attr)
 
     def _selected_aircraft(self, aircraft_list: list[Aircraft]) -> Aircraft | None:
         if not aircraft_list:
@@ -870,8 +539,7 @@ class App:
                     break
 
             if view.dirty:
-                last_ok = view.last_ok.fetched_at if view.last_ok is not None else None
-                self._draw(stdscr, view.rows, view.error, last_ok, view.paused)
+                self._paint(stdscr)
                 view.dirty = False
 
             # A finished registry download changes what the enricher can resolve, so it
@@ -950,7 +618,7 @@ class App:
             with contextlib.suppress(curses.error):
                 curses.curs_set(0)
             stdscr.timeout(GETCH_TIMEOUT_MS)
-            self._attrs = self._build_attrs()
+            self.renderer.setup()
 
             fetch_thread.start()
             self._start_registry_refresh()
