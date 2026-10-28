@@ -43,8 +43,10 @@ def test_search_filter_narrows_to_one_row(spawn):
     term.wait_for("Search")
     press(term, "SKW", "enter")
     term.wait_for("Min altitude", gone=True)
-    term.wait_for("1 aircraft")
-    assert "SKW4455" in term.text and "UAL123" not in term.text
+    # The count line and the rows are drawn in one frame, but wait on all of it (A44).
+    term.wait_for(
+        lambda t: "1 aircraft" in t.text and "SKW4455" in t.text and "UAL123" not in t.text
+    )
 
 
 @pytest.mark.xfail(strict=True, reason="N1: Esc in Filters still applies the typed values")
