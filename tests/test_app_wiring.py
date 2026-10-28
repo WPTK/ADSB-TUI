@@ -346,12 +346,12 @@ def test_a_bug_in_the_fetch_loop_becomes_an_error_banner_not_a_dead_thread(monke
     thread = threading.Thread(target=app._fetch_loop, args=(stop, out), daemon=True)
     thread.start()
     try:
-        snapshot, aircraft, error = out.get(timeout=5)
+        frame = out.get(timeout=5)
     finally:
         stop.set()
         thread.join(timeout=5)
-    assert snapshot is None and aircraft == []
-    assert "parser exploded" in error
+    assert frame.snapshot is None and frame.aircraft == []
+    assert "parser exploded" in frame.error
 
 
 def _save_settings(app, edit):

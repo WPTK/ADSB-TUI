@@ -37,6 +37,7 @@ import sqlite3
 import threading
 import time
 from collections.abc import Callable
+from typing import Any
 
 from adsbtui import (
     __version__,
@@ -50,10 +51,11 @@ from adsbtui import (
 from adsbtui import watchlist as watchlist_mod
 from adsbtui.config import Config, changed_keys, default_config_path, layer_for_save
 from adsbtui.enrich import registry_update
-from adsbtui.model import Aircraft, AlertLevel, Snapshot
+from adsbtui.model import Aircraft, AlertLevel
 from adsbtui.sources import Source, SourceError
 from adsbtui.ui import bars, radar, theme
 from adsbtui.ui import columns as columns_mod
+from adsbtui.ui.frame import Frame
 from adsbtui.ui.keys import ACTION_FOR_KEY, BAR_KEYMAP, HELP_KEYMAP
 from adsbtui.ui.screens.columns import ColumnsScreen
 from adsbtui.ui.screens.data import DataScreen, make_updater
@@ -64,6 +66,7 @@ from adsbtui.ui.screens.settings import SettingsScreen
 from adsbtui.ui.screens.sort import SortScreen
 from adsbtui.ui.screens.watchlist import WatchlistScreen
 from adsbtui.ui.sorting import SORT_KEYS, sort_aircraft
+from adsbtui.ui.view import ViewState
 
 #: Below this width or height, the normal table layout is abandoned for a single centered
 #: "Terminal too small" message -- there simply is not room to draw anything useful, and
@@ -101,7 +104,7 @@ _SCREEN_ACTIONS = frozenset(
 _UNIT_SYSTEMS = ["imperial", "metric", "aviation"]
 
 
-def run_check(cfg: Config, source: Source) -> int:
+def run_check(cfg: Config, source: Source, clock: Callable[[], float] = time.time) -> int:
     """Non-curses helper for a CLI --check flag: fetch once, parse, and report.
 
     Prints "OK <n> aircraft" and returns 0 on success. On any Source-family error, prints
@@ -113,7 +116,7 @@ def run_check(cfg: Config, source: Source) -> int:
         print(f"ERROR: {exc}")
         return 4
 
-    snapshot = normalize.parse_snapshot(raw, time.time())
+    snapshot = normalize.parse_snapshot(raw, clock())
     count = sum(
         1 for raw_ac in snapshot.raw_aircraft if normalize.parse_aircraft(raw_ac) is not None
     )
@@ -124,10 +127,21 @@ def run_check(cfg: Config, source: Source) -> int:
 class App:
     """Owns the fetch thread, the shared queue, and the curses draw loop."""
 
-    def __init__(self, cfg: Config, source: Source, clock: Callable[[], float] = time.time) -> None:
+    def __init__(
+        self,
+        cfg: Config,
+        source: Source,
+        clock: Callable[[], float] = time.time,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
         self.cfg = cfg
         self.source = source
+        #: The only wall clock the program reads. App samples it once per loop turn into
+        #: ``view.now``; the fetch thread stamps ``Frame.fetched_at`` from it.
         self._clock = clock
+        #: Schedules the fetch period; immune to wall-clock steps.
+        self._monotonic = monotonic
+        self.view = ViewState(cfg)
         self._logger = logging.getLogger(_LOGGER_NAME)
 
         self._initial_enricher = self._build_enricher()
@@ -140,12 +154,6 @@ class App:
         self._registry_done = threading.Event()
 
         self._attrs: dict[str, int] = {}
-
-        # Message-rate bookkeeping (main thread only): computed from the cumulative
-        # "messages" counter across successive successful snapshots.
-        self._prev_messages: int | None = None
-        self._prev_messages_time: float | None = None
-        self._msg_rate: float | None = None
 
         # --- watchlist, alert dispatch, sighting history ---------------------------
         watch_entries: list[watchlist_mod.WatchEntry] = []
@@ -168,12 +176,7 @@ class App:
             logger=self._logger,
         )
 
-        # --- live UI state that screens mutate -------------------------------------
-        #: The scope is on whenever the terminal can fit it; 'r' turns it off for anyone
-        #: who wants the full width for the table.
-        self._radar_on = True
-        self._search_text = ""
-        self._feed_stale = False
+        self._frame_seq = 0
         #: Per-update draw caches (A22). The aircraft list is replaced once per fetch, but
         #: the screen is redrawn every second and on every key; the table rows and the
         #: radar plot only change when the list, the layout or the scope settings do.
@@ -181,11 +184,51 @@ class App:
         self._scope_cache: tuple[list[Aircraft], object, radar.Scope] | None = None
         #: (section, key) pairs edited in Settings this session; saved with the file layer.
         self._edited: set[tuple[str, str]] = set()
-        self._flash_text: tuple[str, float] | None = None
-        self._cursor = 0
-        self._scroll = 0
-        self._screen = None
-        self._screen_name: str | None = None
+
+    # The UI state lives in ``self.view``; these keep the names the screens and tests use.
+    @property
+    def _cursor(self) -> int:
+        return self.view.cursor
+
+    @_cursor.setter
+    def _cursor(self, value: int) -> None:
+        self.view.cursor = value
+
+    @property
+    def _scroll(self) -> int:
+        return self.view.scroll
+
+    @_scroll.setter
+    def _scroll(self, value: int) -> None:
+        self.view.scroll = value
+
+    @property
+    def _radar_on(self) -> bool:
+        return self.view.radar_on
+
+    @_radar_on.setter
+    def _radar_on(self, value: bool) -> None:
+        self.view.radar_on = value
+
+    @property
+    def _search_text(self) -> str:
+        return self.view.search_text
+
+    @_search_text.setter
+    def _search_text(self, value: str) -> None:
+        self.view.search_text = value
+
+    @property
+    def _screen(self) -> Any:
+        return self.view.screen
+
+    @property
+    def _screen_name(self) -> str | None:
+        return self.view.screen_name
+
+    @property
+    def _flash_text(self) -> tuple[str, float] | None:
+        return self.view.flash
 
     @property
     def _enricher(self) -> enrich.Enricher:
@@ -289,30 +332,39 @@ class App:
     def _fetch_loop(self, stop_event: threading.Event, out_queue: queue.Queue) -> None:
         backoff = BACKOFF_BASE_S
         while not stop_event.is_set():
-            due = time.monotonic() + self.cfg.source.refresh_s  # period, not fetch + refresh
+            due = self._monotonic() + self.cfg.source.refresh_s  # period, not fetch + refresh
             try:
                 raw = self.source.fetch(self.cfg.source.timeout_s)
-                result = self._pipeline.tick(raw, self._clock(), self._search_text)
+                now = self._clock()
+                result = self._pipeline.tick(raw, now, self._search_text)
                 display = self.cfg.display
                 ordered = sort_aircraft(result.aircraft, display.sort_key, display.sort_reverse)
-                self._feed_stale = result.feed_stale
-                self._publish(out_queue, (result.snapshot, ordered, None))
+                frame = self._frame(now, result.snapshot, ordered, None, result.feed_stale)
+                self._publish(out_queue, frame)
                 backoff = BACKOFF_BASE_S
-                stop_event.wait(max(0.0, due - time.monotonic()))
+                stop_event.wait(max(0.0, due - self._monotonic()))
             except Exception as exc:  # SourceError is expected; anything else is a bug, banner it
                 if isinstance(exc, SourceError):
                     self._logger.warning("fetch failed: %s", exc)
                 else:
                     self._logger.exception("unexpected error in fetch loop: %s", exc)
-                self._publish(out_queue, (None, [], str(exc)))
+                self._publish(out_queue, self._frame(self._clock(), None, [], str(exc), False))
                 stop_event.wait(backoff)
                 backoff = min(backoff * 2, self.cfg.source.backoff_max_s)
 
+    def _frame(
+        self,
+        fetched_at: float,
+        snapshot: Any,
+        aircraft: list[Aircraft],
+        error: str | None,
+        feed_stale: bool,
+    ) -> Frame:
+        self._frame_seq += 1
+        return Frame(self._frame_seq, fetched_at, snapshot, aircraft, error, feed_stale)
+
     @staticmethod
-    def _publish(
-        out_queue: queue.Queue,
-        item: tuple[Snapshot | None, list[Aircraft], str | None],
-    ) -> None:
+    def _publish(out_queue: queue.Queue, item: Frame) -> None:
         """Drop-oldest publish: clear the queue first so the UI thread only ever sees the
         latest tick and never blocks a slow consumer, then put the new item."""
         while True:
@@ -460,12 +512,13 @@ class App:
             return
 
         display = self.cfg.display
+        view = self.view
         normal_attr = self._attrs.get("normal", curses.A_NORMAL)
         header_attr = self._attrs.get("header", curses.A_BOLD)
 
         # Row 0 is live state, the bottom row is the key hints, and everything between is
         # the actual content. Nothing on screen spends a row on things that never change.
-        age = None if last_success_at is None else max(0.0, time.time() - last_success_at)
+        age = None if last_success_at is None else max(0.0, view.now - last_success_at)
         alert_count = sum(
             1 for ac in aircraft_list if ac.alert_level not in (AlertLevel.NONE, AlertLevel.NEARBY)
         )
@@ -476,13 +529,13 @@ class App:
             last_success_age_s=age,
             aircraft_count=len(aircraft_list),
             alert_count=alert_count,
-            msg_rate=self._msg_rate,
+            msg_rate=view.msg_rate,
             paused=paused,
-            clock=time.strftime("%H:%M:%S"),
+            clock=view.clock_text(),
             note=self._current_note(),
-            feed_stale=self._feed_stale,
+            feed_stale=view.feed_stale,
         )
-        bad = last_error is not None or self._feed_stale
+        bad = last_error is not None or view.feed_stale
         status_attr = self._attrs.get("bad" if bad else "ok", header_attr)
         self._safe_addstr(stdscr, 0, 0, status, status_attr)
 
@@ -619,20 +672,7 @@ class App:
         return max(1, height - 4)
 
     def _clamp_view(self, total: int, table_height: int) -> None:
-        """Keep the cursor within the list and the scroll window around the cursor."""
-        if total == 0:
-            self._cursor = 0
-            self._scroll = 0
-            return
-        self._cursor = max(0, min(self._cursor, total - 1))
-        if table_height <= 0:
-            self._scroll = 0
-            return
-        if self._cursor < self._scroll:
-            self._scroll = self._cursor
-        elif self._cursor >= self._scroll + table_height:
-            self._scroll = self._cursor - table_height + 1
-        self._scroll = max(0, min(self._scroll, max(0, total - table_height)))
+        self.view.clamp(total, table_height)
 
     def _draw_screen_overlay(self, stdscr, width: int, height: int) -> None:
         """Draw the active screen centered over the table, inside a bordered box.
@@ -687,18 +727,19 @@ class App:
     def _open_screen(self, name: str, aircraft_list: list[Aircraft]) -> None:
         """Construct and push the named screen. Unknown names are ignored."""
         display = self.cfg.display
+        screen: Any = None
         if name == "help":
-            self._screen = HelpScreen(HELP_KEYMAP, __version__)
+            screen = HelpScreen(HELP_KEYMAP, __version__)
         elif name == "detail":
             ac = self._selected_aircraft(aircraft_list)
             if ac is None:
                 return
-            self._screen = DetailScreen(ac, display.units)
+            screen = DetailScreen(ac, display.units)
         elif name == "sort":
-            self._screen = SortScreen(SORT_KEYS, display.sort_key, display.sort_reverse)
+            screen = SortScreen(SORT_KEYS, display.sort_key, display.sort_reverse)
         elif name == "filters":
             f = self.cfg.filter
-            self._screen = FiltersScreen(
+            screen = FiltersScreen(
                 {
                     "hide_ground": f.hide_ground,
                     "include_nonicao": f.include_nonicao,
@@ -708,20 +749,19 @@ class App:
                 search_text=self._search_text,
             )
         elif name == "columns":
-            self._screen = ColumnsScreen(display.columns, display.borders)
+            screen = ColumnsScreen(display.columns, display.borders)
         elif name == "watchlist":
-            self._screen = WatchlistScreen(
-                self._watch_entries, self._selected_aircraft(aircraft_list)
-            )
+            screen = WatchlistScreen(self._watch_entries, self._selected_aircraft(aircraft_list))
         elif name == "settings":
-            self._screen = SettingsScreen(self.cfg)
+            screen = SettingsScreen(self.cfg)
         elif name == "data":
-            self._screen = DataScreen(
+            screen = DataScreen(
                 self.cfg.registry.db,
                 stale_after_days=self.cfg.registry.max_age_days,
                 updater=make_updater(self.cfg.registry.tar1090_url, self.cfg.registry.faa_url),
             )
-        self._screen_name = name if self._screen is not None else None
+        if screen is not None:
+            self.view.push(name, screen)
 
     def _close_screen(self) -> None:
         """Pop the active screen, applying whatever it produced back onto live config.
@@ -730,11 +770,10 @@ class App:
         reading result() unconditionally here is safe: a cancelled screen returns exactly
         what it was given.
         """
-        screen, name = self._screen, self._screen_name
-        self._screen = None
-        self._screen_name = None
-        if screen is None:
+        popped = self.view.pop()
+        if popped is None:
             return
+        name, screen = popped
 
         display = self.cfg.display
         if name == "sort":
@@ -784,6 +823,7 @@ class App:
         new_cfg._file_layer = self.cfg._file_layer
         self._edited |= changed_keys(self.cfg, new_cfg)
         self.cfg = new_cfg
+        self.view.cfg = new_cfg
         self._pipeline.cfg = new_cfg
 
         # Settings that feed long-lived objects have to be re-read, not just stored.
@@ -807,80 +847,39 @@ class App:
 
     def _current_note(self) -> str | None:
         """The status-line note: a recent flash message, else the registry job's progress."""
-        if self._flash_text is not None:
-            text, until = self._flash_text
-            if time.monotonic() < until:
-                return text
-            self._flash_text = None
-        return self._registry_status
+        self.view.registry_note = self._registry_status
+        return self.view.note()
 
     def _flash(self, text: str, seconds: float = 6.0) -> None:
         """Show a short message in the status line for a few seconds."""
-        self._flash_text = (text, time.monotonic() + seconds)
-
-    def _update_msg_rate(self, snapshot: Snapshot) -> None:
-        """Update the rolling messages/sec estimate from two successive snapshots'
-        cumulative "messages" counters. Resets to None (rather than going negative) if the
-        counter ever decreases, which means the upstream source restarted."""
-        if snapshot.messages is None:
-            return
-        if self._prev_messages is not None and self._prev_messages_time is not None:
-            dt = snapshot.fetched_at - self._prev_messages_time
-            delta = snapshot.messages - self._prev_messages
-            if dt > 0 and delta >= 0:
-                self._msg_rate = delta / dt
-            else:
-                self._msg_rate = None
-        self._prev_messages = snapshot.messages
-        self._prev_messages_time = snapshot.fetched_at
+        self.view.flash_for(text, seconds)
 
     # ------------------------------------------------------------------
     # Main event loop
     # ------------------------------------------------------------------
 
     def _event_loop(self, stdscr, stop_event: threading.Event, out_queue: queue.Queue) -> int:
-        aircraft_list: list[Aircraft] = []
-        last_error: str | None = None
-        last_success_at: float | None = None
-        paused = False
-        dirty = True
-        last_second = int(time.time())
+        view = self.view
 
         while True:
-            got_update = False
+            view.tick(self._clock())
             while True:
                 try:
-                    snapshot, acs, err = out_queue.get_nowait()
+                    view.apply(out_queue.get_nowait())
                 except queue.Empty:
                     break
-                got_update = True
-                if err is not None:
-                    last_error = err
-                else:
-                    last_error = None
-                    last_success_at = time.time()
-                    if snapshot is not None:
-                        self._update_msg_rate(snapshot)
-                    if not paused:
-                        aircraft_list = acs
-            if got_update:
-                dirty = True
 
-            now_second = int(time.time())
-            if now_second != last_second:
-                last_second = now_second
-                dirty = True
-
-            if dirty:
-                self._draw(stdscr, aircraft_list, last_error, last_success_at, paused)
-                dirty = False
+            if view.dirty:
+                last_ok = view.last_ok.fetched_at if view.last_ok is not None else None
+                self._draw(stdscr, view.rows, view.error, last_ok, view.paused)
+                view.dirty = False
 
             # A finished registry download changes what the enricher can resolve, so it
             # is swapped in here, on the main thread, rather than under a running fetch.
             if self._registry_done.is_set():
                 self._registry_done.clear()
                 self._enricher = self._build_enricher()
-                dirty = True
+                view.dirty = True
 
             # The bell fires here rather than on the fetch thread: curses.beep() is a
             # curses call, and only this thread may make one.
@@ -893,15 +892,15 @@ class App:
             key = stdscr.getch()
             if key == -1:
                 continue
-            dirty = True
+            view.dirty = True
 
             if key == curses.KEY_RESIZE:
                 continue
 
             # A screen, when open, gets first refusal on every key: it owns the keyboard
             # until it says it is done.
-            if self._screen is not None:
-                if self._screen.handle_key(key) in ("close", "close-and-save"):
+            if view.screen is not None:
+                if view.screen.handle_key(key) in ("close", "close-and-save"):
                     self._close_screen()
                 continue
 
@@ -909,29 +908,29 @@ class App:
             if action == "quit":
                 return 0
             if action in _SCREEN_ACTIONS:
-                self._open_screen(action, aircraft_list)
+                self._open_screen(action, view.rows)
             elif action == "reverse":
                 self.cfg.display.sort_reverse = not self.cfg.display.sort_reverse
             elif action == "pause":
-                paused = not paused
+                view.paused = not view.paused
             elif action == "radar":
-                self._radar_on = not self._radar_on
+                view.radar_on = not view.radar_on
             elif action == "units":
                 current = self.cfg.display.units
                 index = _UNIT_SYSTEMS.index(current) if current in _UNIT_SYSTEMS else 0
                 self.cfg.display.units = _UNIT_SYSTEMS[(index + 1) % len(_UNIT_SYSTEMS)]
             elif action == "up":
-                self._cursor -= 1
+                view.cursor -= 1
             elif action == "down":
-                self._cursor += 1
+                view.cursor += 1
             elif action == "top":
-                self._cursor = 0
+                view.cursor = 0
             elif action == "bottom":
-                self._cursor = max(0, len(aircraft_list) - 1)
+                view.cursor = max(0, len(view.rows) - 1)
             elif action == "page_up":
-                self._cursor -= max(1, self._page_size(stdscr))
+                view.cursor -= max(1, self._page_size(stdscr))
             elif action == "page_down":
-                self._cursor += max(1, self._page_size(stdscr))
+                view.cursor += max(1, self._page_size(stdscr))
             elif action == "radius":
                 if key in (ord("+"), ord("=")):
                     self.cfg.filter.radius += 1.0
