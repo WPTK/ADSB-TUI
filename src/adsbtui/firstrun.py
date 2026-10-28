@@ -47,8 +47,14 @@ def should_offer_setup(args, *, stdin=None, stdout=None) -> bool:
     Requires all of: an interactive terminal on both ends (the wizard has to draw and to
     read keys), no scripted mode requested, and no explicit --config, since naming a file
     that then fails to load is a mistake to report rather than a blank slate to fill in.
+    The same goes for a config file that already exists (a typo in it is an error, and the
+    wizard would overwrite it) and for --demo, which is a complete run without any setup.
     """
     if args is None:
+        return False
+    if getattr(args, "demo", False):
+        return False
+    if find_config_path(None) is not None:
         return False
     if getattr(args, "config", None):
         return False

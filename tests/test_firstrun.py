@@ -17,6 +17,13 @@ from adsbtui import firstrun
 from adsbtui.config import Config, build_argparser
 
 
+@pytest.fixture(autouse=True)
+def _no_config_file(tmp_path, monkeypatch):
+    """Start every test with no config file anywhere: first run is the no-config case."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.delenv("ADSBTUI_CONFIG", raising=False)
+
+
 class _Stream:
     """Minimal stdin/stdout stand-in with a controllable isatty()."""
 
@@ -175,3 +182,64 @@ def test_the_wizard_is_seeded_from_the_environment_and_command_line(monkeypatch)
     )
     assert seen["source.url"] == "http://env.example/aircraft.json"
     assert seen["home.lat"] == 12.5
+
+
+# ----------------------------------------------------------------------------------
+# An error is not a first run (A57)
+# ----------------------------------------------------------------------------------
+
+
+def _tty(monkeypatch):
+    monkeypatch.setattr(firstrun.sys, "stdin", _Stream(True))
+    monkeypatch.setattr(firstrun.sys, "stdout", _Stream(True))
+
+
+def _fail_if_wizard_runs(monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("the wizard must not open")
+
+    monkeypatch.setattr(firstrun, "run_setup", boom)
+
+
+def test_an_existing_config_with_a_bad_value_exits_2_and_is_left_untouched(
+    tmp_path, monkeypatch, capsys
+):
+    from adsbtui.__main__ import main
+
+    path = tmp_path / "xdg" / "adsbtui" / "config.toml"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b'[home]\nlat = 1.0\nlon = 2.0\n[filter]\nradius = "abc"\n')
+    before = path.read_bytes()
+    _tty(monkeypatch)
+    _fail_if_wizard_runs(monkeypatch)
+
+    assert main([]) == 2
+    assert "Configuration error" in capsys.readouterr().err
+    assert path.read_bytes() == before
+
+
+def test_a_bad_environment_value_with_a_config_present_exits_2(tmp_path, monkeypatch, capsys):
+    from adsbtui.__main__ import main
+
+    path = tmp_path / "xdg" / "adsbtui" / "config.toml"
+    path.parent.mkdir(parents=True)
+    path.write_text("[home]\nlat = 1.0\nlon = 2.0\n")
+    before = path.read_bytes()
+    monkeypatch.setenv("ADSBTUI_HOME_LAT", "north")
+    _tty(monkeypatch)
+    _fail_if_wizard_runs(monkeypatch)
+
+    assert main([]) == 2
+    assert "Configuration error" in capsys.readouterr().err
+    assert path.read_bytes() == before
+
+
+def test_demo_with_a_bad_environment_value_opens_no_wizard(monkeypatch, capsys):
+    from adsbtui.__main__ import main
+
+    monkeypatch.setenv("ADSBTUI_HOME_LAT", "north")
+    _tty(monkeypatch)
+    _fail_if_wizard_runs(monkeypatch)
+
+    assert main(["--demo"]) == 2
+    assert "Configuration error" in capsys.readouterr().err
