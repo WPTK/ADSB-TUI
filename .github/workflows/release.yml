@@ -63,6 +63,7 @@ jobs:
           "$RUNNER_TEMP/smoke/bin/python" -m pip install dist/*.whl
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/smoke/bin/adsbtui" --check --url "$GITHUB_WORKSPACE/tests/fixtures/aircraft.json" --lat 37.7749 --lon -122.4194
+          test "$("$RUNNER_TEMP/smoke/bin/adsbtui" --version)" = "adsbtui ${{ steps.version.outputs.version }}"
 
       - name: The built version matches the tag
         env:
