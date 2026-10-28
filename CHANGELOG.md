@@ -17,6 +17,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A CJK callsign fills its cell instead of wrapping the row: cells are measured in terminal
   columns, not characters.
 
+- **A bad source can no longer print a traceback.** A file that is not UTF-8, JSON nested
+  hundreds of thousands deep, a directory in place of a file and a malformed URL all report
+  as ordinary source errors. A bug inside the fetch loop is logged and shown in the banner
+  instead of being excused from test coverage.
+- **`source.timeout_s` is a wall-clock limit on the whole HTTP fetch.** A feed that drips a
+  byte at a time used to hang `--once` and `--check` forever; it now times out.
+
 ### Removed
 - `Aircraft.extra`, an unread copy of every raw record made on every tick.
 - **The current directory is no longer searched for `adsb-tui.toml`.** A config can set

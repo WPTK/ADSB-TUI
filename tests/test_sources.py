@@ -5,6 +5,7 @@ from __future__ import annotations
 import http.server
 import json
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ import pytest
 from adsbtui.sources import (
     SourceError,
     SourceInvalidData,
+    SourceTimeout,
     SourceUnreachable,
     make_source,
 )
@@ -139,3 +141,101 @@ class TestMakeSource:
     def test_max_bytes_is_passed_through(self):
         source = make_source("/tmp/x.json", max_bytes=123)
         assert source.max_bytes == 123
+
+
+# Hostile bodies: whatever a server sends, fetch() raises a SourceError and nothing else.
+
+NOT_UTF8 = b'{"aircraft": [], "x": "\xff\xfe\xfa"}'
+DEEP = b"[" * 200_000 + b"]" * 200_000
+
+
+class TestFileSourceHostileInput:
+    @pytest.mark.parametrize(
+        "body",
+        [NOT_UTF8, DEEP, b"", b"\x00\x00", b"[1, 2]", b"nan"],
+        ids=["not-utf8", "deep", "empty", "nul", "array", "nan"],
+    )
+    def test_unusable_bodies_are_invalid_data(self, tmp_path, body):
+        path = tmp_path / "aircraft.json"
+        path.write_bytes(body)
+        with pytest.raises(SourceInvalidData):
+            FileSource(str(path), max_bytes=8_000_000).fetch(timeout=1.0)
+
+    def test_a_directory_is_unreachable_not_a_traceback(self, tmp_path):
+        with pytest.raises(SourceUnreachable):
+            FileSource(str(tmp_path), max_bytes=8_000_000).fetch(timeout=1.0)
+
+    def test_oversize_is_rejected_by_the_bytes_actually_read(self, tmp_path):
+        path = tmp_path / "aircraft.json"
+        path.write_text('{"aircraft": [' + "1," * 100 + "1]}")
+        with pytest.raises(SourceInvalidData, match="max_bytes"):
+            FileSource(str(path), max_bytes=50).fetch(timeout=1.0)
+
+
+def _serve(handler_cls):
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler_cls)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, server.server_address[1]
+
+
+def _body_handler(body: bytes):
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format, *args):  # noqa: A002
+            pass
+
+    return Handler
+
+
+class DripHandler(http.server.BaseHTTPRequestHandler):
+    """Promises a big body, then sends one byte every 0.2 s, never idle long enough to trip
+    a per-read timeout."""
+
+    def do_GET(self):  # noqa: N802
+        self.send_response(200)
+        self.send_header("Content-Length", "100000")
+        self.end_headers()
+        try:
+            self.wfile.write(b"{")
+            self.wfile.flush()
+            for _ in range(200):
+                time.sleep(0.2)
+                self.wfile.write(b" ")
+                self.wfile.flush()
+        except OSError:
+            pass
+
+    def log_message(self, format, *args):  # noqa: A002
+        pass
+
+
+class TestHttpSourceHostileInput:
+    @pytest.mark.parametrize("body", [NOT_UTF8, DEEP, b"[]"], ids=["not-utf8", "deep", "array"])
+    def test_unusable_bodies_are_invalid_data(self, body):
+        server, port = _serve(_body_handler(body))
+        try:
+            with pytest.raises(SourceInvalidData):
+                HttpSource(f"http://127.0.0.1:{port}/", max_bytes=8_000_000).fetch(timeout=5.0)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_a_drip_feed_times_out_on_the_wall_clock(self):
+        server, port = _serve(DripHandler)
+        try:
+            started = time.monotonic()
+            with pytest.raises(SourceTimeout):
+                HttpSource(f"http://127.0.0.1:{port}/", max_bytes=8_000_000).fetch(timeout=1.0)
+            assert time.monotonic() - started < 2.0
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_an_unusable_url_is_unreachable(self):
+        with pytest.raises(SourceUnreachable):
+            HttpSource("http://", max_bytes=1000).fetch(timeout=1.0)

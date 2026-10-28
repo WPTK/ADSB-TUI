@@ -88,7 +88,7 @@ _LABELS_AND_HELP: dict[str, tuple[str, str]] = {
     "source.refresh_s": ("Refresh (s)", "Seconds between polls of the source."),
     "source.timeout_s": (
         "Timeout (s)",
-        "Give up on a read from the source after this many seconds.",
+        "Give up on a fetch that has not finished after this many seconds.",
     ),
     "source.stale_s": (
         "Feed stale (s)",
