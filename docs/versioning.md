@@ -11,3 +11,12 @@ number stays 0. There will be no 1.0.
 
 The version lives in `pyproject.toml` and `src/adsbtui/__init__.py`; a unit test keeps them
 equal and in this format.
+
+## Releasing
+
+A release is cut by hand: bump the version in `pyproject.toml` and `src/adsbtui/__init__.py`
+in a PR, merge it, then run the **Release** workflow from `main`. It checks the version is
+ZeroVer and sorts above every existing `v*` tag, runs the tests, builds, confirms the wheel's
+version equals the tag, and publishes a GitHub Release `v<version>` (marked a pre-release for
+`rcN`). It stops if the tag or release already exists and never overwrites. Nothing is
+uploaded to PyPI.

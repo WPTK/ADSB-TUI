@@ -11,7 +11,7 @@ import sqlite3
 
 import pytest
 
-from adsbtui.config import Config
+from adsbtui.config import Config, RegistryConfig
 from adsbtui.enrich import registry_update
 from adsbtui.output import registry_is_due
 
@@ -37,7 +37,7 @@ def _db_with_meta(path: str, fetched_at: float) -> None:
         conn.executescript(registry_update._SCHEMA)  # noqa: SLF001 - the real schema
         conn.execute(
             "INSERT OR REPLACE INTO meta (source, url, fetched_at, row_count) VALUES (?, ?, ?, ?)",
-            (registry_update.SOURCE_TAR1090, registry_update.TAR1090_URL, fetched_at, 0),
+            (registry_update.SOURCE_TAR1090, RegistryConfig().tar1090_url, fetched_at, 0),
         )
         conn.commit()
     finally:

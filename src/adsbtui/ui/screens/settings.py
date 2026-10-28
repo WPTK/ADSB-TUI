@@ -228,6 +228,14 @@ _LABELS_AND_HELP: dict[str, tuple[str, str]] = {
         "Auto-update",
         "Download a fresh registry in the background when it is missing or stale.",
     ),
+    "registry.tar1090_url": (
+        "tar1090-db URL",
+        "Where the tar1090-db aircraft list is downloaded from (an http(s) URL or a file).",
+    ),
+    "registry.faa_url": (
+        "FAA registry URL",
+        "Where the FAA ReleasableAircraft.zip is downloaded from (an http(s) URL or a file).",
+    ),
     "history.db": (
         "History database",
         "SQLite file recording closed tracks; empty disables history.",

@@ -146,7 +146,7 @@ class TestBuildFromTar1090:
         second = write_tar1090(
             tmp_path / "second.csv.gz", "C01234;C-GABC;DH8D;00;DE HAVILLAND Dash 8;2001;AIR CO;\n"
         )
-        result = build_from_tar1090(second, db_path)
+        result = build_from_tar1090(second, db_path, force=True)
 
         assert result.row_count == 1
         assert set(rows(db_path)) == {"c01234"}
@@ -303,6 +303,7 @@ class TestMultipleSources:
         build_from_tar1090(
             write_tar1090(tmp_path / "again.csv.gz", "C01234;C-GABC;DH8D;00;Dash 8;2001;AIR CO;\n"),
             db_path,
+            force=True,
         )
 
         built = rows(db_path)
@@ -420,7 +421,8 @@ class TestDownload:
         assert not _leftovers(tmp_path)
 
     def test_network_failure_becomes_a_registry_error(self, tmp_path, monkeypatch):
-        opener = FakeOpener(urllib.error.URLError("no route to host"))
+        monkeypatch.setattr(registry_update, "_RETRY_DELAY_S", 0.0)
+        opener = FakeOpener(*[urllib.error.URLError("no route to host")] * 2)
         monkeypatch.setattr(urllib.request, "urlopen", opener)
 
         with pytest.raises(RegistryError, match="could not download"):
@@ -504,7 +506,8 @@ class TestBuildFromUrl:
         assert tar_ua.startswith("adsb-tui/")
 
     def test_a_failed_download_leaves_no_scratch_directory(self, tmp_path, monkeypatch):
-        opener = FakeOpener(urllib.error.URLError("boom"))
+        monkeypatch.setattr(registry_update, "_RETRY_DELAY_S", 0.0)
+        opener = FakeOpener(*[urllib.error.URLError("boom")] * 2)
         monkeypatch.setattr(urllib.request, "urlopen", opener)
         before = set(os.listdir(registry_update.tempfile.gettempdir()))
 
@@ -513,3 +516,77 @@ class TestBuildFromUrl:
 
         after = set(os.listdir(registry_update.tempfile.gettempdir()))
         assert not {name for name in after - before if name.startswith("adsbtui-registry-")}
+
+
+class TestRowFloor:
+    def test_a_truncated_source_does_not_replace_the_database(self, tmp_path):
+        db_path = str(tmp_path / "registry.db")
+        build_from_tar1090(write_tar1090(tmp_path / "first.csv.gz"), db_path)
+        before = set(rows(db_path))
+        truncated = write_tar1090(
+            tmp_path / "second.csv.gz", "C01234;C-GABC;DH8D;00;DE HAVILLAND Dash 8;2001;AIR CO;\n"
+        )
+
+        with pytest.raises(RegistryError, match="under 50%"):
+            build_from_tar1090(truncated, db_path)
+
+        assert set(rows(db_path)) == before
+
+
+class TestRetry:
+    def _serve(self, statuses):
+        import http.server
+        import threading
+
+        hits = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                code = statuses[min(len(hits), len(statuses) - 1)]
+                hits.append(code)
+                self.send_response(code)
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"ok")
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        return server, hits
+
+    def test_a_server_error_is_retried_once(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(registry_update, "_RETRY_DELAY_S", 0.0)
+        server, hits = self._serve([503, 200])
+        try:
+            result = registry_update.download(
+                f"http://127.0.0.1:{server.server_port}/x", str(tmp_path / "out")
+            )
+        finally:
+            server.shutdown()
+        assert hits == [503, 200] and result.size == 2
+
+    def test_a_second_failure_is_reported(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(registry_update, "_RETRY_DELAY_S", 0.0)
+        server, hits = self._serve([503])
+        try:
+            with pytest.raises(RegistryError, match="HTTP 503"):
+                registry_update.download(
+                    f"http://127.0.0.1:{server.server_port}/x", str(tmp_path / "out")
+                )
+        finally:
+            server.shutdown()
+        assert len(hits) == 2
+
+    def test_a_client_error_is_not_retried(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(registry_update, "_RETRY_DELAY_S", 0.0)
+        server, hits = self._serve([403])
+        try:
+            with pytest.raises(RegistryError, match="HTTP 403"):
+                registry_update.download(
+                    f"http://127.0.0.1:{server.server_port}/x", str(tmp_path / "out")
+                )
+        finally:
+            server.shutdown()
+        assert hits == [403]
