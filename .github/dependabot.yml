@@ -1,0 +1,8 @@
+version: 2
+updates:
+  # Keeps the SHA pins in .github/workflows current: each PR bumps the pinned commit and
+  # its "# vX.Y.Z" comment together.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
