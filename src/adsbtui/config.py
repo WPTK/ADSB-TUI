@@ -595,7 +595,7 @@ def cli_overrides(args: argparse.Namespace) -> dict[str, Any]:
     return overrides
 
 
-def _env_overrides(env: dict[str, str]) -> dict[str, str]:
+def env_overrides(env: dict[str, str]) -> dict[str, str]:
     """Map an environment mapping (e.g. os.environ) to the flat "section.key" -> value
     dict build_config() expects, reading ADSBTUI_SECTION_KEY style names."""
     overrides: dict[str, str] = {}
@@ -626,7 +626,7 @@ def load_config(argv: list[str] | None = None) -> Config:
     config_path = find_config_path(args.config)
     toml_dict = load_toml(config_path)
 
-    env_dict = _env_overrides(dict(os.environ))
+    env_dict = env_overrides(dict(os.environ))
     cli_dict = cli_overrides(args)
 
     cfg = build_config(
