@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import curses
 import random
+import sys
 import time
 
 import pytest
@@ -22,6 +23,19 @@ FRAMES = 20
 COLD_BUDGET_S = 0.040
 #: CPU seconds per frame when only the clock ticked or a key moved the cursor.
 WARM_BUDGET_S = 0.008
+
+
+def _traced() -> bool:
+    """True under coverage (or a debugger): tracing makes Python several times slower, so a
+    CPU budget measured then says nothing about the code. The uat job runs with coverage;
+    the plain test jobs enforce the budget."""
+    monitoring = getattr(sys, "monitoring", None)
+    return sys.gettrace() is not None or (
+        monitoring is not None and any(monitoring.get_tool(i) for i in range(6))
+    )
+
+
+needs_untraced = pytest.mark.skipif(_traced(), reason="CPU budgets are meaningless when traced")
 
 
 class _Source:
@@ -79,12 +93,14 @@ def _cpu_per_frame(frame) -> float:
     return (time.process_time() - start) / FRAMES
 
 
+@needs_untraced
 def test_a_frame_after_a_fetch_is_within_budget(drawing):
     app, window, fleet = drawing
     cost = _cpu_per_frame(lambda: app._draw(window, list(fleet), None, time.time(), False))  # noqa: SLF001
     assert cost < COLD_BUDGET_S, f"{cost * 1000:.1f} ms per frame"
 
 
+@needs_untraced
 def test_a_redraw_of_the_same_data_is_cheap(drawing):
     app, window, fleet = drawing
     cost = _cpu_per_frame(lambda: app._draw(window, fleet, None, time.time(), False))  # noqa: SLF001
