@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import contextlib
 import curses
+import textwrap
 from collections.abc import Callable, Sequence
 from typing import Any
 
@@ -50,6 +51,16 @@ def _clip(text: str, width: int) -> str:
     if len(text) > width:
         return text[:width]
     return text
+
+
+def wrap_text(text: str, width: int, indent: str = "") -> list[str]:
+    """Wrap text to width, continuation lines prefixed with indent. For help text and key
+    hints, where cutting a line mid-word hides the part the reader came for."""
+    if width <= 0:
+        return []
+    return textwrap.wrap(
+        text, width, initial_indent=indent, subsequent_indent=indent, break_long_words=True
+    ) or [""]
 
 
 def _safe_addstr(win: Any, y: int, x: int, text: str, *args: Any) -> None:
@@ -548,7 +559,33 @@ class Tabs:
         parts = []
         for i, label in enumerate(self.labels):
             parts.append(f"[{label}]" if i == self._active else f" {label} ")
-        return [_clip(" ".join(parts), width)]
+        line = " ".join(parts)
+        if len(line) <= width:
+            return [line]
+        # Too wide: show a window of tabs around the active one, with "<" / ">" marking
+        # what is scrolled off, so the active tab is never the part that gets cut.
+        lo = hi = self._active
+        while True:
+            grew = False
+            if hi + 1 < len(parts) and self._window_fits(parts, lo, hi + 1, width):
+                hi += 1
+                grew = True
+            if lo > 0 and self._window_fits(parts, lo - 1, hi, width):
+                lo -= 1
+                grew = True
+            if not grew:
+                break
+        return [_clip(self._window_text(parts, lo, hi), width)]
+
+    @staticmethod
+    def _window_text(parts: list[str], lo: int, hi: int) -> str:
+        left = "<" if lo > 0 else " "
+        right = ">" if hi < len(parts) - 1 else ""
+        return left + " ".join(parts[lo : hi + 1]) + right
+
+    @classmethod
+    def _window_fits(cls, parts: list[str], lo: int, hi: int, width: int) -> bool:
+        return len(cls._window_text(parts, lo, hi)) <= width
 
     def draw(self, win: Any, y: int, x: int) -> None:
         _safe_addstr(win, y, x, self.render_lines(10**9)[0])

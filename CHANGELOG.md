@@ -109,6 +109,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   around left the docs describing a workflow nobody should follow.
 
 ### Fixed
+- **Dialog frames were one column short** on the top edge, so the corner sat left of the side
+  borders. Settings, filter and watchlist hints and the settings tab row no longer cut text
+  mid-word on an 80-column terminal: hints wrap, and the tab row scrolls to keep the active
+  section in view. The radar's W tick shares a row with E and home. CLIMB and TAIL no longer
+  clip an ordinary value on a narrow terminal.
 - **The FAA registry download works again** (#7). registry.faa.gov answers 403 to any client
   it does not take for a browser, so `F8` → FAA always failed; that one request now sends a
   browser User-Agent. tar1090-db and everything else still identify as adsb-tui.

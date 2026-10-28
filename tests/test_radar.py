@@ -88,6 +88,14 @@ class TestGeometry:
         assert n[0] < home[0] and s[0] > home[0]
         assert e[1] > home[1] and w[1] < home[1]
 
+    @pytest.mark.parametrize("height", [10, 11, 20, 21, 30])
+    def test_east_and_west_ticks_share_the_home_row(self, height):
+        """With an even row count the centre falls between rows; E and W used to round to
+        different rows because of float noise in cos(90) vs cos(270)."""
+        scope = radar.render([], width=41, height=height, range_mi=10.0)
+        home = _find(scope, "⌂")[0]
+        assert _find(scope, "E")[0][0] == home[0] == _find(scope, "W")[0][0]
+
     def test_rings_are_circular_not_stretched(self):
         """Cells are twice as tall as wide, so a ring's half-width in columns must be about
         twice its half-height in rows. Without the aspect correction it would be 1:1 and

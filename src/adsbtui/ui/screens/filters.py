@@ -23,7 +23,7 @@ import curses
 from collections.abc import Mapping
 from typing import Any
 
-from adsbtui.ui.widgets import Form, NumberField, TextField, Toggle
+from adsbtui.ui.widgets import Form, NumberField, TextField, Toggle, wrap_text
 
 #: Escape cancels the screen: discard any in-progress edits and close without applying.
 _CANCEL_KEYS = frozenset({27})
@@ -133,5 +133,5 @@ class FiltersScreen:
         lines: list[str] = [_clip(self.title, width), ""]
         lines.extend(self._form.render_lines(width))
         lines.append("")
-        lines.append(_clip(_FOOTER_TEXT, width))
+        lines.extend(wrap_text(_FOOTER_TEXT, width))
         return lines[:height]

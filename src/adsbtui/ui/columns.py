@@ -92,13 +92,13 @@ COLUMN_SPECS: dict[str, ColumnSpec] = {
         "alert", "ALERT", min_width=5, max_width=8, priority=4, align="left", short="ALRT"
     ),
     "vs": ColumnSpec(
-        "vs", "CLIMB", min_width=10, max_width=12, priority=8, align="right", short="CLIMB"
+        "vs", "CLIMB", min_width=11, max_width=12, priority=8, align="right", short="CLIMB"
     ),
     "brg": ColumnSpec(
         "brg", "DIRECTION", min_width=7, max_width=9, priority=9, align="left", short="DIR"
     ),
     "reg": ColumnSpec(
-        "reg", "TAIL", min_width=6, max_width=8, priority=5, align="left", short="TAIL"
+        "reg", "TAIL", min_width=7, max_width=8, priority=5, align="left", short="TAIL"
     ),
     "type": ColumnSpec(
         "type", "TYPE", min_width=4, max_width=4, priority=7, align="left", short="TYPE"

@@ -38,7 +38,7 @@ from __future__ import annotations
 import curses
 from typing import TYPE_CHECKING
 
-from adsbtui.ui.widgets import Form, ListPicker, Select, TextField
+from adsbtui.ui.widgets import Form, ListPicker, Select, TextField, wrap_text
 from adsbtui.watchlist import WatchEntry, parse_line
 
 if TYPE_CHECKING:
@@ -240,6 +240,6 @@ class WatchlistScreen:
         if self._selected_aircraft is not None:
             footer += "   w quick-add hex"
         footer += "   Tab move   Enter commit   Esc/F10 close"
-        lines.append(_clip(footer, width))
+        lines.extend(wrap_text(footer, width))
 
         return lines[:height]
