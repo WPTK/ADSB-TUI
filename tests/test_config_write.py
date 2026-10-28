@@ -35,18 +35,15 @@ def make_config() -> Config:
     cfg.filter.min_alt_ft = 500
     cfg.filter.max_alt_ft = 45000
     cfg.display.units = "metric"
-    cfg.display.theme = "default"
     cfg.display.color = "never"
     cfg.display.columns = ["flight", "reg", "dist"]
     cfg.display.owner_width = 24
     cfg.display.borders = "ascii"
-    cfg.display.density = "compact"
     cfg.display.sort_key = "altitude"
     cfg.display.sort_reverse = True
     cfg.display.stale_after_s = 20.0
     cfg.display.linger_s = 12.5
     cfg.display.status_bar = False
-    cfg.display.vs_threshold_fpm = 300.0
     cfg.alerts.emergency = False
     cfg.alerts.squawks = [7700]
     cfg.alerts.emergency_ignore_radius = False
@@ -63,8 +60,6 @@ def make_config() -> Config:
     cfg.alerts.cooldown_s = 120.0
     cfg.alerts.quiet_hours = "23:00-07:00"
     cfg.watchlist.path = "/home/pi/watchlist.txt"
-    cfg.watchlist.pin_top = False
-    cfg.watchlist.ignore_radius = False
     cfg.registry.db = "/home/pi/registry.sqlite3"
     cfg.registry.max_age_days = 7
     cfg.registry.auto_update = False
@@ -74,7 +69,6 @@ def make_config() -> Config:
     cfg.logging.level = "DEBUG"
     cfg.logging.max_bytes = 2_097_152
     cfg.logging.backup_count = 5
-    cfg.logging.redact_home = False
     return cfg
 
 

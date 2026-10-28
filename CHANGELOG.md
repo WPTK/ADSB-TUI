@@ -5,6 +5,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+- **The current directory is no longer searched for `adsb-tui.toml`.** A config can set
+  `alerts.command`, so a file in an untrusted directory could run a command.
+- **Six settings that did nothing are gone**: `display.theme`, `display.density` (and the
+  density choice on the Columns screen), `display.vs_threshold_fpm`, `watchlist.pin_top`,
+  `watchlist.ignore_radius` and `logging.redact_home`. Config files that still set them load;
+  the keys are ignored.
+
+### Changed
+- The sdist no longer ships the screenshots, `AUDIT.md` or the root `adsbtui.py` shim.
+- Docs: config file discovery order, what `timeout_s` really bounds, and the Windows
+  `windows-curses` extra next to "no runtime dependencies". The kiosk unit no longer claims the
+  entry point is missing.
+
 ### Added
 - **A radar scope.** Aircraft are plotted around you with range rings, N/E/S/W ticks and a
   direction arrow per contact, so the shape of the traffic is visible instead of implied by a
@@ -12,10 +26,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   degrades to ASCII where the border style asks for it.
 - **Rows are colored by altitude band** when nothing more urgent applies: warm low, cool high.
   An ordinary screenful now carries information rather than being one flat color.
-- **A bare receiver address works as a source.** `--url 192.168.3.80` (or a hostname, or
+- **A bare receiver address works as a source.** `--url 192.0.2.10` (or a hostname, or
   `host:8080`) probes the paths receiver images actually publish aircraft.json at and keeps
   whichever answers. It previously fell through to the file loader and failed with "file not
-  found: 192.168.3.80", having never touched the network at all.
+  found: 192.0.2.10", having never touched the network at all.
 - **The registry downloads itself** in the background when it is missing or older than
   `registry.max_age_days` (now 1 day, was 30). Owner and type data no longer wait for anyone to
   find a screen and press a key; the status line carries the progress.

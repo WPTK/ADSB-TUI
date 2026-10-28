@@ -183,7 +183,7 @@ class TestApply:
     def test_editing_a_comma_separated_list_changes_the_returned_config(self) -> None:
         screen = make_screen()
         goto_tab(screen, "display")
-        goto_field(screen, 3)  # columns
+        goto_field(screen, 2)  # columns
         retype(screen, len(", ".join(Config().display.columns)), "flight, reg, dist")
         screen.handle_key(ENTER)
         assert screen.result().display.columns == ["flight", "reg", "dist"]

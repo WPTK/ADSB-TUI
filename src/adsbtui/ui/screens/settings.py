@@ -10,7 +10,7 @@ key added to a config section automatically appears here instead of silently bec
 uneditable. Each field gets a widget chosen by the type of its dataclass default (str ->
 TextField, bool -> Toggle, int/float -> NumberField, list -> a TextField holding a
 comma-separated list), except for the handful of keys whose value must be one of a fixed
-set -- display.units, display.color, display.borders, display.density and
+set -- display.units, display.color, display.borders and
 alerts.webhook_format -- which get a Select. Every field also carries a one-line help
 string; those strings are, in practice, the closest thing this project has to in-app
 documentation of each setting, so they are written to be read by a user rather than by a
@@ -70,7 +70,6 @@ _CHOICES: dict[str, list[tuple[str, str]]] = {
     ],
     "display.color": [("auto", "Auto"), ("always", "Always"), ("never", "Never")],
     "display.borders": [("unicode", "Unicode"), ("ascii", "ASCII"), ("none", "None")],
-    "display.density": [("compact", "Compact"), ("normal", "Normal"), ("wide", "Wide")],
     "alerts.webhook_format": [
         ("auto", "Auto"),
         ("json", "JSON"),
@@ -87,7 +86,10 @@ _LABELS_AND_HELP: dict[str, tuple[str, str]] = {
         "http(s) URL, bare path, or file:// URL of your receiver's aircraft.json.",
     ),
     "source.refresh_s": ("Refresh (s)", "Seconds between polls of the source."),
-    "source.timeout_s": ("Timeout (s)", "Give up on a single fetch after this many seconds."),
+    "source.timeout_s": (
+        "Timeout (s)",
+        "Give up on a read from the source after this many seconds.",
+    ),
     "source.stale_s": (
         "Feed stale (s)",
         "Age at which the feed's own data is treated as stale.",
@@ -124,7 +126,6 @@ _LABELS_AND_HELP: dict[str, tuple[str, str]] = {
         "Units",
         "imperial (mi/ft/mph), metric (km/m/km-h), or aviation (nm/ft/kt).",
     ),
-    "display.theme": ("Theme", "Name of the color theme; only 'default' exists today."),
     "display.color": (
         "Color",
         "auto follows the terminal, always forces color on, never disables it.",
@@ -138,7 +139,6 @@ _LABELS_AND_HELP: dict[str, tuple[str, str]] = {
         "Borders",
         "Box-drawing style for the header divider and column separators.",
     ),
-    "display.density": ("Density", "Row density: compact, normal, or wide."),
     "display.sort_key": (
         "Sort key",
         "What the table is sorted by. Any column: distance, altitude, callsign, reg, "
@@ -155,10 +155,6 @@ _LABELS_AND_HELP: dict[str, tuple[str, str]] = {
         "Seconds a vanished aircraft stays listed, marked lost, before removal.",
     ),
     "display.status_bar": ("Status bar", "Show the bottom status line."),
-    "display.vs_threshold_fpm": (
-        "Climb threshold",
-        "Vertical speed, ft/min, above which a row reads as climbing or descending.",
-    ),
     "alerts.emergency": (
         "Emergency",
         "Grade a watched squawk or a reported emergency state as EMERGENCY.",
@@ -220,11 +216,6 @@ _LABELS_AND_HELP: dict[str, tuple[str, str]] = {
         "Watchlist file",
         "Plain-text file of hex codes, registrations, callsigns, and types to watch.",
     ),
-    "watchlist.pin_top": ("Pin to top", "Sort watchlist matches above everything else."),
-    "watchlist.ignore_radius": (
-        "Ignore radius",
-        "Show a watchlist match even when it is outside the filter radius.",
-    ),
     "registry.db": (
         "Registry database",
         "SQLite cache of aircraft registrations built from tar1090-db or the FAA registry.",
@@ -249,7 +240,6 @@ _LABELS_AND_HELP: dict[str, tuple[str, str]] = {
     "logging.level": ("Log level", "DEBUG, INFO, WARNING, or ERROR."),
     "logging.max_bytes": ("Rotate at", "Rotate the log once it reaches this many bytes."),
     "logging.backup_count": ("Backups kept", "How many rotated log files to keep."),
-    "logging.redact_home": ("Redact home", "Keep home coordinates out of log output."),
 }
 
 

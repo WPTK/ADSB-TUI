@@ -6,13 +6,21 @@ below is also in the Settings screen (`F2`) with the same default and a one-line
 Keys marked **†** are stored, validated, and editable, but don't affect behavior yet. See
 [Known gaps](../README.md#known-gaps).
 
+**Which file is read.** The first that exists of: `--config PATH`, `$ADSBTUI_CONFIG`,
+`$XDG_CONFIG_HOME/adsbtui/config.toml` (`XDG_CONFIG_HOME` defaults to `~/.config`). The current
+directory is never searched, because a config can set `alerts.command`. An explicit path that
+cannot be read is an error; with no file at all, defaults, environment and flags apply.
+Old files that still set a retired key (`display.theme`, `display.density`,
+`display.vs_threshold_fpm`, `watchlist.pin_top`, `watchlist.ignore_radius`,
+`logging.redact_home`) load without complaint and the key is ignored.
+
 **`[source]`**
 
 | Key | Default | Meaning |
 |---|---|---|
 | `url` | `""` (required) | `aircraft.json`: URL, bare path, or `file://` |
 | `refresh_s` | `5.0` | Seconds between polls |
-| `timeout_s` | `5.0` | Per-fetch timeout |
+| `timeout_s` | `5.0` | Timeout for each network read, not for the whole fetch (a feed that trickles bytes can outlast it) |
 | `stale_s` † | `30.0` | Max age before the *source* counts as stale |
 | `backoff_max_s` | `30.0` | Cap on fetch-retry backoff |
 | `max_bytes` | `8000000` | Reject a larger response |
@@ -34,18 +42,15 @@ Keys marked **†** are stored, validated, and editable, but don't affect behavi
 | Key | Default | Meaning |
 |---|---|---|
 | `units` | `"imperial"` | `imperial` / `metric` / `aviation` |
-| `theme` † | `"default"` | Only `"default"` exists today |
 | `color` | `"auto"` | `auto` / `always` / `never` |
 | `columns` | 13 defaults | Which columns, in what order (`hex` is also available) |
 | `owner_width` | `30` | Owner column width |
 | `borders` | `"unicode"` | `unicode` / `ascii` / `none` |
-| `density` † | `"normal"` | Not read by the renderer yet |
 | `sort_key` | `"distance"` | Any column, see [Sortable fields](#sortable-fields) |
 | `sort_reverse` | `false` | Reverse the sort |
 | `stale_after_s` | `15.0` | Dim a row after this long with no position update |
 | `linger_s` | `30.0` | Keep a dropped aircraft on screen (marked lost) this long |
 | `status_bar` | `true` | Show the bottom status line |
-| `vs_threshold_fpm` † | `256.0` | Renderer uses its own identical hardcoded value |
 
 **`[alerts]`**
 
@@ -73,15 +78,14 @@ webhook_format = "ntfy"
 quiet_hours = "22:00-07:00"
 ```
 
-**`[watchlist]`**: `path` (default `~/.config/adsbtui/watchlist.txt`, see below); `pin_top` †,
-`ignore_radius` † (stored, not yet applied)
+**`[watchlist]`**: `path` (default `~/.config/adsbtui/watchlist.txt`, see below)
 
 **`[registry]`**: `db` (SQLite path), `max_age_days` (`1`, how old before a background refresh),
 `auto_update` (`true`). See [Aircraft data](#aircraft-data-owner-type-country).
 
 **`[history]`**: `db` (`""` disables sighting history), `retention_days` (`365`)
 
-**`[logging]`**: `file`, `level`, `max_bytes`, `backup_count`, `redact_home` † (not yet applied)
+**`[logging]`**: `file`, `level`, `max_bytes`, `backup_count`
 
 **CLI flags**: `--config`, `--url`, `--lat`, `--lon`, `--radius`, `--proximity`, `--refresh`,
 `--log-file`, `--log-level`, `--units`, `--no-color`, `--debug`, `--once`,

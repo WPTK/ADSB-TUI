@@ -166,9 +166,9 @@ class TestEnvCoercion:
     def test_env_bool_false_spellings(self, spelling):
         toml_dict = _base_toml()
         cfg = build_config(
-            toml_dict, env={"filter.hide_ground": "true", "watchlist.pin_top": spelling}
+            toml_dict, env={"filter.hide_ground": "true", "filter.include_nonicao": spelling}
         )
-        assert cfg.watchlist.pin_top is False
+        assert cfg.filter.include_nonicao is False
 
     def test_env_bool_garbage_raises(self):
         toml_dict = _base_toml()
@@ -240,11 +240,13 @@ class TestFindConfigPath:
         monkeypatch.setenv("ADSBTUI_CONFIG", str(tmp_path / "env.toml"))
         assert find_config_path(None) == str(tmp_path / "env.toml")
 
-    def test_cwd_file_used_when_present(self, tmp_path, monkeypatch):
+    def test_cwd_file_is_never_picked_up(self, tmp_path, monkeypatch):
+        # A config can set alerts.command, so a file in an untrusted directory must not load.
         monkeypatch.delenv("ADSBTUI_CONFIG", raising=False)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "no-such-xdg-dir"))
         monkeypatch.chdir(tmp_path)
-        (tmp_path / "adsb-tui.toml").write_text('[source]\nurl = "x"\n')
-        assert find_config_path(None) == "adsb-tui.toml"
+        (tmp_path / "adsb-tui.toml").write_text('[alerts]\ncommand = "evil"\n')
+        assert find_config_path(None) is None
 
     def test_xdg_config_used_when_present(self, tmp_path, monkeypatch):
         monkeypatch.delenv("ADSBTUI_CONFIG", raising=False)
@@ -261,6 +263,31 @@ class TestFindConfigPath:
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "no-such-xdg-dir"))
         assert find_config_path(None) is None
+
+
+class TestRetiredKeys:
+    @pytest.mark.parametrize(
+        "section,key,value",
+        [
+            ("display", "theme", "default"),
+            ("display", "density", "compact"),
+            ("display", "vs_threshold_fpm", 300.0),
+            ("watchlist", "pin_top", False),
+            ("watchlist", "ignore_radius", False),
+            ("logging", "redact_home", False),
+        ],
+    )
+    def test_old_files_that_set_a_retired_key_still_load(self, section, key, value):
+        toml_dict = _base_toml()
+        toml_dict.setdefault(section, {})[key] = value
+        cfg = build_config(toml_dict)
+        assert not hasattr(getattr(cfg, section), key)
+
+    def test_a_typo_is_still_rejected(self):
+        toml_dict = _base_toml()
+        toml_dict["display"] = {"densty": "wide"}
+        with pytest.raises(ConfigError, match="densty"):
+            build_config(toml_dict)
 
 
 class TestCliOverrides:

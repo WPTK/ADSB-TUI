@@ -46,7 +46,7 @@ class Source(Protocol):
 
 
 def looks_like_bare_host(text: str) -> bool:
-    """True if text is a hostname or IP with no scheme and no path, e.g. "192.168.3.80".
+    """True if text is a hostname or IP with no scheme and no path, e.g. "192.0.2.10".
 
     This is the address a person types when asked where their receiver is, and it is
     neither a URL nor a file path. Anything containing a path separator, a leading dot, or
@@ -74,8 +74,8 @@ def make_source(url_or_path: str, max_bytes: int = DEFAULT_MAX_BYTES) -> Source:
     """Build the right Source for a URL, a bare receiver address, or a filesystem path.
 
     "http://..." and "https://..." return an HttpSource, except for a URL with no path of
-    its own ("http://192.168.3.80"), which is a receiver address wearing a scheme and gets
-    probed like one. A bare host or host:port ("192.168.3.80", "adsb.local:8080") returns
+    its own ("http://192.0.2.10"), which is a receiver address wearing a scheme and gets
+    probed like one. A bare host or host:port ("192.0.2.10", "adsb.local:8080") returns
     a ReceiverSource, which finds the right aircraft.json path on that machine itself.
     Anything else -- "/run/readsb/aircraft.json", a relative path, or a "file://" URL --
     returns a FileSource.

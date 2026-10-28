@@ -14,12 +14,10 @@ ALL_KEYS = list(COLUMN_SPECS.keys())
 
 def make_screen(
     current_columns: list[str] | None = None,
-    current_density: str = "normal",
     current_borders: str = "unicode",
 ) -> ColumnsScreen:
     return ColumnsScreen(
         current_columns if current_columns is not None else DEFAULT_COLUMNS,
-        current_density,
         current_borders,
     )
 
@@ -34,19 +32,12 @@ class TestConstruction:
         assert screen.focus == 0
 
     def test_result_matches_constructor_args_before_any_key(self) -> None:
-        screen = make_screen(
-            current_columns=["flight", "alt"], current_density="wide", current_borders="ascii"
-        )
-        assert screen.result() == {
-            "columns": ["flight", "alt"],
-            "density": "wide",
-            "borders": "ascii",
-        }
+        screen = make_screen(current_columns=["flight", "alt"], current_borders="ascii")
+        assert screen.result() == {"columns": ["flight", "alt"], "borders": "ascii"}
 
-    def test_unknown_density_and_borders_do_not_raise(self) -> None:
-        screen = make_screen(current_density="bogus", current_borders="bogus")
+    def test_unknown_borders_do_not_raise(self) -> None:
+        screen = make_screen(current_borders="bogus")
         # Nothing applied yet: result() still echoes exactly what was passed in.
-        assert screen.result()["density"] == "bogus"
         assert screen.result()["borders"] == "bogus"
 
     def test_unknown_column_keys_are_ignored_in_the_checklist(self) -> None:
@@ -90,28 +81,25 @@ class TestConstruction:
 
 
 class TestFocusSwitching:
-    def test_tab_moves_focus_to_density(self) -> None:
+    def test_tab_moves_focus_to_borders(self) -> None:
         screen = make_screen()
         assert screen.handle_key(ord("\t")) is None
         assert screen.focus == 1
 
-    def test_tab_moves_focus_through_all_three_and_wraps(self) -> None:
+    def test_tab_moves_focus_through_both_and_wraps(self) -> None:
         screen = make_screen()
         screen.handle_key(ord("\t"))
         assert screen.focus == 1
-        screen.handle_key(ord("\t"))
-        assert screen.focus == 2
         screen.handle_key(ord("\t"))
         assert screen.focus == 0
 
     def test_shift_tab_moves_focus_backward_and_wraps(self) -> None:
         screen = make_screen()
         assert screen.handle_key(curses.KEY_BTAB) is None
-        assert screen.focus == 2
+        assert screen.focus == 1
 
     def test_tab_never_closes(self) -> None:
         screen = make_screen()
-        assert screen.handle_key(ord("\t")) is None
         assert screen.handle_key(ord("\t")) is None
         assert screen.handle_key(ord("\t")) is None
 
@@ -158,57 +146,42 @@ class TestColumnPickerInteraction:
 
     def test_plus_minus_ignored_when_columns_not_focused(self) -> None:
         screen = make_screen(current_columns=["flight", "alt", "gs"])
-        screen.handle_key(ord("\t"))  # focus -> density
+        screen.handle_key(ord("\t"))  # focus -> borders
         outcome = screen.handle_key(ord("+"))
         assert outcome is None
         # Order is unaffected since the picker never saw the key while unfocused.
-        screen.handle_key(ord("\t"))
         screen.handle_key(ord("\t"))
         outcome2 = screen.handle_key(curses.KEY_ENTER)
         assert outcome2 == "close"
         assert screen.result()["columns"] == ["flight", "alt", "gs"]
 
 
-class TestDensityAndBordersInteraction:
-    def test_right_arrow_cycles_density_when_focused(self) -> None:
-        screen = make_screen(current_density="compact")
-        screen.handle_key(ord("\t"))  # focus -> density
-        screen.handle_key(curses.KEY_RIGHT)
-        lines = screen.render_lines(80, 40)
-        density_line = next(line for line in lines if "Density:" in line)
-        assert "Normal" in density_line
-
+class TestBordersInteraction:
     def test_borders_select_cycles_when_focused(self) -> None:
         screen = make_screen(current_borders="unicode")
-        screen.handle_key(ord("\t"))
         screen.handle_key(ord("\t"))  # focus -> borders
         screen.handle_key(curses.KEY_RIGHT)
         lines = screen.render_lines(80, 40)
         borders_line = next(line for line in lines if "Borders:" in line)
         assert "ASCII" in borders_line
 
-    def test_density_change_not_applied_until_enter(self) -> None:
-        screen = make_screen(current_density="compact")
+    def test_borders_change_not_applied_until_enter(self) -> None:
+        screen = make_screen(current_borders="unicode")
         screen.handle_key(ord("\t"))
         screen.handle_key(curses.KEY_RIGHT)
-        assert screen.result()["density"] == "compact"
+        assert screen.result()["borders"] == "unicode"
 
 
 class TestApplyAndCancel:
     def test_enter_applies_and_closes(self) -> None:
-        screen = make_screen(
-            current_columns=["flight", "alt"], current_density="compact", current_borders="ascii"
-        )
+        screen = make_screen(current_columns=["flight", "alt"], current_borders="ascii")
         screen.handle_key(ord(" "))  # uncheck "flight"
-        screen.handle_key(ord("\t"))
-        screen.handle_key(curses.KEY_RIGHT)  # density -> normal
         screen.handle_key(ord("\t"))
         screen.handle_key(curses.KEY_RIGHT)  # borders -> none
         outcome = screen.handle_key(curses.KEY_ENTER)
         assert outcome == "close"
         result = screen.result()
         assert "flight" not in result["columns"]
-        assert result["density"] == "normal"
         assert result["borders"] == "none"
 
     @pytest.mark.parametrize("enter_key", [10, 13, curses.KEY_ENTER, curses.KEY_F10])
@@ -233,21 +206,16 @@ class TestApplyAndCancel:
         assert outcome == "close"
         assert screen.result()["columns"] == ["flight", "alt"]
 
-    def test_escape_closes_without_applying_density_or_borders(self) -> None:
-        screen = make_screen(current_density="compact", current_borders="ascii")
-        screen.handle_key(ord("\t"))
-        screen.handle_key(curses.KEY_RIGHT)
+    def test_escape_closes_without_applying_borders(self) -> None:
+        screen = make_screen(current_borders="ascii")
         screen.handle_key(ord("\t"))
         screen.handle_key(curses.KEY_RIGHT)
         outcome = screen.handle_key(27)
         assert outcome == "close"
-        result = screen.result()
-        assert result["density"] == "compact"
-        assert result["borders"] == "ascii"
+        assert screen.result()["borders"] == "ascii"
 
     def test_escape_from_any_focus_cancels(self) -> None:
         screen = make_screen()
-        screen.handle_key(ord("\t"))
         screen.handle_key(ord("\t"))
         outcome = screen.handle_key(27)
         assert outcome == "close"
@@ -261,8 +229,8 @@ class TestRenderLines:
         screen.handle_key(ord("\t"))
         after = screen.render_lines(80, 40)
         assert after[0].startswith(" ")
-        density_line_index = next(i for i, line in enumerate(after) if "Density:" in line)
-        assert after[density_line_index].startswith(">")
+        borders_line_index = next(i for i, line in enumerate(after) if "Borders:" in line)
+        assert after[borders_line_index].startswith(">")
 
     def test_lines_clipped_to_width(self) -> None:
         screen = make_screen()
@@ -291,12 +259,10 @@ class TestRenderLines:
         assert isinstance(lines, list)
         assert all(isinstance(line, str) for line in lines)
 
-    def test_shows_density_and_borders_values(self) -> None:
-        screen = make_screen(current_density="wide", current_borders="none")
+    def test_shows_borders_value(self) -> None:
+        screen = make_screen(current_borders="none")
         lines = screen.render_lines(80, 40)
-        text = "\n".join(lines)
-        assert "Wide" in text
-        assert "None" in text
+        assert "None" in "\n".join(lines)
 
     def test_shows_hint_line(self) -> None:
         screen = make_screen()

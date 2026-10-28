@@ -68,7 +68,6 @@ class FilterConfig:
 @dataclass
 class DisplayConfig:
     units: str = "imperial"
-    theme: str = "default"
     color: str = "auto"
     columns: list[str] = field(
         default_factory=lambda: [
@@ -89,13 +88,11 @@ class DisplayConfig:
     )
     owner_width: int = 30
     borders: str = "unicode"
-    density: str = "normal"
     sort_key: str = "distance"
     sort_reverse: bool = False
     stale_after_s: float = 15.0
     linger_s: float = 30.0
     status_bar: bool = True
-    vs_threshold_fpm: float = 256.0
 
 
 @dataclass
@@ -122,8 +119,6 @@ class AlertsConfig:
 @dataclass
 class WatchlistConfig:
     path: str = "~/.config/adsbtui/watchlist.txt"
-    pin_top: bool = True
-    ignore_radius: bool = True
 
 
 @dataclass
@@ -151,7 +146,6 @@ class LoggingConfig:
     level: str = "INFO"
     max_bytes: int = 1_048_576
     backup_count: int = 3
-    redact_home: bool = True
 
 
 @dataclass
@@ -170,6 +164,20 @@ class Config:
     _args: argparse.Namespace | None = field(default=None, repr=False, compare=False)
     _config_path: str | None = field(default=None, repr=False, compare=False)
 
+
+#: Keys that older config files may still set but that no longer do anything. They are
+#: accepted and ignored (expand, migrate, contract) so an upgrade never breaks a working file;
+#: the next Settings save drops them.
+RETIRED_KEYS: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("display", "theme"),
+        ("display", "density"),
+        ("display", "vs_threshold_fpm"),
+        ("watchlist", "pin_top"),
+        ("watchlist", "ignore_radius"),
+        ("logging", "redact_home"),
+    }
+)
 
 #: section name -> dataclass type, driving both the layering logic and type coercion.
 _SECTIONS: dict[str, type] = {
@@ -193,10 +201,12 @@ _SECTIONS: dict[str, type] = {
 def find_config_path(explicit: str | None = None) -> str | None:
     """Resolve which TOML config file to use, or None if none is found.
 
-    Precedence: `explicit` argument, then the ADSBTUI_CONFIG env var, then ./adsb-tui.toml
-    (if it exists in the current directory), then $XDG_CONFIG_HOME/adsbtui/config.toml
-    (defaulting XDG_CONFIG_HOME to ~/.config if unset), if that exists. A missing file at
-    every candidate is not an error -- it just means defaults/env/CLI apply.
+    Precedence: `explicit` argument, then the ADSBTUI_CONFIG env var, then
+    $XDG_CONFIG_HOME/adsbtui/config.toml (defaulting XDG_CONFIG_HOME to ~/.config if unset),
+    if that exists. The current directory is deliberately not searched: a config can set
+    alerts.command, so picking one up from whatever directory the app was started in would
+    let an untrusted directory run a command. A missing file at every candidate is not an
+    error -- it just means defaults/env/CLI apply.
     """
     if explicit:
         return explicit
@@ -204,10 +214,6 @@ def find_config_path(explicit: str | None = None) -> str | None:
     env_path = os.environ.get("ADSBTUI_CONFIG")
     if env_path:
         return env_path
-
-    cwd_candidate = Path("adsb-tui.toml")
-    if cwd_candidate.is_file():
-        return str(cwd_candidate)
 
     xdg_home = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
     xdg_candidate = Path(xdg_home) / "adsbtui" / "config.toml"
@@ -348,6 +354,8 @@ def build_config(
         raw = section_values[section_name]
         kwargs: dict[str, Any] = {}
         for key, value in raw.items():
+            if (section_name, key) in RETIRED_KEYS:
+                continue
             if key not in defaults:
                 raise ConfigError(f"unknown config key {section_name}.{key!r}")
             try:
