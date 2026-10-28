@@ -71,22 +71,22 @@ class Controller:
             f.radius = max(1.0, f.radius - 1.0)
 
     def _up(self, key: int, layout: Layout) -> None:
-        self.view.cursor -= 1
+        self.view.move_cursor(self.view.cursor - 1)
 
     def _down(self, key: int, layout: Layout) -> None:
-        self.view.cursor += 1
+        self.view.move_cursor(self.view.cursor + 1)
 
     def _top(self, key: int, layout: Layout) -> None:
-        self.view.cursor = 0
+        self.view.move_cursor(0)
 
     def _bottom(self, key: int, layout: Layout) -> None:
-        self.view.cursor = max(0, len(self.view.rows) - 1)
+        self.view.move_cursor(len(self.view.rows) - 1)
 
     def _page_up(self, key: int, layout: Layout) -> None:
-        self.view.cursor -= max(1, layout.table_height)
+        self.view.move_cursor(self.view.cursor - max(1, layout.table_height))
 
     def _page_down(self, key: int, layout: Layout) -> None:
-        self.view.cursor += max(1, layout.table_height)
+        self.view.move_cursor(self.view.cursor + max(1, layout.table_height))
 
 
 def _opener(name: str) -> Callable[[Controller, int, Layout], None]:

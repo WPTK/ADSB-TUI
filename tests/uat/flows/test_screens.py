@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import fakefeed
-import pytest
 from fakefeed import HOME_LAT, HOME_LON, ac
 from keys import FIXTURE_ROWS, order, press
 
@@ -49,7 +48,6 @@ def test_search_filter_narrows_to_one_row(spawn):
     )
 
 
-@pytest.mark.xfail(strict=True, reason="N1: Esc in Filters still applies the typed values")
 def test_escape_keeps_the_old_filter(spawn, feed):
     term = spawn(env=FAST_LINGER)
     term.wait_for("UAL123")

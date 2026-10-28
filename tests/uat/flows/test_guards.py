@@ -199,7 +199,6 @@ def test_an_overlay_below_the_minimum_size_still_takes_the_keys(spawn):
 # ------------------------------------------------------------------- G-S selection pin
 
 
-@pytest.mark.xfail(strict=True, reason="A46: the cursor is a row index, not an aircraft (B2-7)")
 def test_the_selection_stays_on_its_aircraft_when_a_nearer_one_appears(spawn, feed):
     term = spawn()
     term.wait_for("UAL123")

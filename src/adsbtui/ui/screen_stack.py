@@ -93,6 +93,8 @@ class ScreenStack:
         if name == "sort":
             display.sort_key, display.sort_reverse = screen.result()
         elif name == "filters":
+            if not screen.applied:  # Esc: the screen's live values are not a result
+                return
             result = screen.result()
             f = cfg.filter
             f.hide_ground = bool(result.get("hide_ground", f.hide_ground))
