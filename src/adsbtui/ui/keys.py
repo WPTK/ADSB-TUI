@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Binding:
-    action: str  #: handler name in App._event_loop
+    action: str  #: handler in controller._HANDLERS
     label: str  #: shown in Help and (when ``bar``) in the key bar
     keys: tuple[int, ...]
     bar: str = ""  #: label in the bottom key bar; empty = not advertised there
