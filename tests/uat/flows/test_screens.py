@@ -169,31 +169,25 @@ def test_help_opens_lists_keys_and_any_key_closes(spawn):
     term.wait_for("UAL123")
     for opener in ("?", "f1"):
         press(term, opener)
-        term.wait_for("Any key closes")
+        term.wait_for("any other key closes")
         assert "Quit" in term.text and "Settings" in term.text
         press(term, "x")
-        term.wait_for("Any key closes", gone=True)
+        term.wait_for("any other key closes", gone=True)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="A21: Help omits S, d, D, ',', '/', j/k, Home/End, PgUp/PgDn"
-)
 def test_help_lists_every_bound_key(spawn):
     term = spawn()
     term.wait_for("UAL123")
     press(term, "?")
-    term.wait_for("Any key closes")
-    for needle in ("j/k", "Home", "PgUp", "Reverse"):
+    term.wait_for("any other key closes")
+    for needle in ("Down/j", "Home", "PgUp", "Reverse"):
         assert needle in term.text, needle
 
 
-@pytest.mark.xfail(
-    strict=True, reason="A20: Help cannot scroll, so the glossary is cut off at 80x24"
-)
 def test_help_scrolls_to_the_glossary_at_80x24(spawn):
     term = spawn(80, 24)
     term.wait_for("UAL123")
     press(term, "?")
-    term.wait_for("Any key closes")
+    term.wait_for("any other key closes")
     press(term, "pgdn", "pgdn", "pgdn")
-    term.wait_for("Glossary")
+    term.wait_for("CLOSEST PASS")

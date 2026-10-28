@@ -56,6 +56,7 @@ from adsbtui.model import Aircraft, AlertLevel, Snapshot
 from adsbtui.sources import Source, SourceError
 from adsbtui.ui import bars, radar, theme
 from adsbtui.ui import columns as columns_mod
+from adsbtui.ui.keys import ACTION_FOR_KEY, BAR_KEYMAP, HELP_KEYMAP
 from adsbtui.ui.screens.columns import ColumnsScreen
 from adsbtui.ui.screens.data import DataScreen
 from adsbtui.ui.screens.detail import DetailScreen
@@ -93,26 +94,10 @@ RADAR_GAP = 2
 
 _LOGGER_NAME = "adsbtui"
 
-#: Action name -> key label, rendered in the key bar and the help overlay. Single source
-#: of truth: the event loop's key handling and this table must agree, so the bar can never
-#: advertise a key that does nothing.
-#: Order matters: the key bar is truncated to fit the terminal width, so the two keys a
-#: user must never be unable to find -- how to get help and how to get out -- come first.
-KEYMAP: dict[str, str] = {
-    "help": "F1/?",
-    "quit": "q",
-    "settings": "F2",
-    "data": "F8",
-    "detail": "Enter",
-    "sort": "s",
-    "filters": "f",
-    "columns": "c",
-    "watchlist": "w",
-    "pause": "p",
-    "radar": "r",
-    "units": "u",
-    "radius": "+/-",
-}
+#: Key-table actions that open a screen of the same name.
+_SCREEN_ACTIONS = frozenset(
+    {"help", "settings", "data", "detail", "filters", "sort", "columns", "watchlist"}
+)
 
 #: Sort keys offered by the Sort screen, as (value, label) pairs. "distance", "altitude",
 #: and "callsign" are kept first and spelled out (rather than the abbreviated column keys
@@ -457,7 +442,10 @@ class App:
         # so colored rows still ride on whatever background the user's terminal theme sets)
         # when use_default_colors() is available, else an explicit black as a fallback.
         pair_bg = curses.COLOR_BLACK
-        if self.cfg.display.color != "never":
+        # NO_COLOR (no-color.org): a non-empty value turns "auto" off; an explicit
+        # "always" in the config still wins.
+        no_color = self.cfg.display.color == "auto" and bool(os.environ.get("NO_COLOR"))
+        if self.cfg.display.color != "never" and not no_color:
             try:
                 curses.start_color()
                 try:
@@ -642,7 +630,7 @@ class App:
                 ascii_only=ascii_only,
             )
 
-        key_line = bars.key_bar_text(width, KEYMAP)
+        key_line = bars.key_bar_text(width, BAR_KEYMAP)
         self._safe_addstr(stdscr, height - 1, 0, key_line, self._attrs.get("chrome", normal_attr))
 
         if self._screen is not None:
@@ -777,7 +765,7 @@ class App:
         """Construct and push the named screen. Unknown names are ignored."""
         display = self.cfg.display
         if name == "help":
-            self._screen = HelpScreen(KEYMAP, __version__)
+            self._screen = HelpScreen(HELP_KEYMAP, __version__)
         elif name == "detail":
             ac = self._selected_aircraft(aircraft_list)
             if ac is None:
@@ -993,51 +981,38 @@ class App:
                     self._close_screen()
                 continue
 
-            if key in (ord("q"), ord("Q"), curses.KEY_F10):
+            action = ACTION_FOR_KEY.get(key)
+            if action == "quit":
                 return 0
-
-            if key in (ord("?"), curses.KEY_F1):
-                self._open_screen("help", aircraft_list)
-            elif key in (curses.KEY_F2, ord(",")):
-                self._open_screen("settings", aircraft_list)
-            elif key in (curses.KEY_F8, ord("D")):
-                self._open_screen("data", aircraft_list)
-            elif key in (curses.KEY_ENTER, ord("\n"), ord("\r"), ord("d")):
-                self._open_screen("detail", aircraft_list)
-            elif key in (ord("/"), curses.KEY_F3, ord("f"), curses.KEY_F4):
-                self._open_screen("filters", aircraft_list)
-            elif key in (ord("s"), curses.KEY_F5):
-                self._open_screen("sort", aircraft_list)
-            elif key in (ord("S"),):
+            if action in _SCREEN_ACTIONS:
+                self._open_screen(action, aircraft_list)
+            elif action == "reverse":
                 self.cfg.display.sort_reverse = not self.cfg.display.sort_reverse
-            elif key in (ord("c"), curses.KEY_F6):
-                self._open_screen("columns", aircraft_list)
-            elif key in (ord("w"), curses.KEY_F7):
-                self._open_screen("watchlist", aircraft_list)
-            elif key in (ord("p"), ord("P")):
+            elif action == "pause":
                 paused = not paused
-            elif key in (ord("r"), ord("R")):
+            elif action == "radar":
                 self._radar_on = not self._radar_on
-            elif key == ord("u"):
+            elif action == "units":
                 current = self.cfg.display.units
                 index = _UNIT_SYSTEMS.index(current) if current in _UNIT_SYSTEMS else 0
                 self.cfg.display.units = _UNIT_SYSTEMS[(index + 1) % len(_UNIT_SYSTEMS)]
-            elif key in (curses.KEY_UP, ord("k")):
+            elif action == "up":
                 self._cursor -= 1
-            elif key in (curses.KEY_DOWN, ord("j")):
+            elif action == "down":
                 self._cursor += 1
-            elif key == curses.KEY_HOME:
+            elif action == "top":
                 self._cursor = 0
-            elif key == curses.KEY_END:
+            elif action == "bottom":
                 self._cursor = max(0, len(aircraft_list) - 1)
-            elif key == curses.KEY_PPAGE:
+            elif action == "page_up":
                 self._cursor -= max(1, self._page_size(stdscr))
-            elif key == curses.KEY_NPAGE:
+            elif action == "page_down":
                 self._cursor += max(1, self._page_size(stdscr))
-            elif key in (ord("+"), ord("=")):
-                self.cfg.filter.radius += 1.0
-            elif key in (ord("-"), ord("_")):
-                self.cfg.filter.radius = max(1.0, self.cfg.filter.radius - 1.0)
+            elif action == "radius":
+                if key in (ord("+"), ord("=")):
+                    self.cfg.filter.radius += 1.0
+                else:
+                    self.cfg.filter.radius = max(1.0, self.cfg.filter.radius - 1.0)
 
     def run(self, stdscr) -> int:
         """Entry point for curses.wrapper(app.run). Returns the process exit code."""
