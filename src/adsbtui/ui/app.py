@@ -45,11 +45,9 @@ from adsbtui import (
     config_write,
     dispatch,
     enrich,
-    geo,
-    history,
     normalize,
     output,
-    tracker,
+    pipeline,
 )
 from adsbtui import watchlist as watchlist_mod
 from adsbtui.config import Config
@@ -144,18 +142,6 @@ _UNIT_SYSTEMS = ["imperial", "metric", "aviation"]
 #: AlertLevel -> severity rank, for sorting by "alert level". Built from the enum's own
 #: declaration order (model.py), which is already least-to-most alarming.
 _ALERT_RANK: dict[AlertLevel, int] = {level: rank for rank, level in enumerate(AlertLevel)}
-
-
-def _is_emergency(cfg: Config, aircraft: Aircraft) -> bool:
-    """Lightweight pre-check mirroring alerts.grade()'s first branch, used only to decide
-    whether an aircraft should bypass the radius filter -- the authoritative alert_level
-    (including EMERGENCY) is still assigned afterwards by alerts.grade() itself."""
-    if not cfg.alerts.emergency:
-        return False
-    watched_squawks = {str(s) for s in cfg.alerts.squawks}
-    if aircraft.squawk is not None and aircraft.squawk in watched_squawks:
-        return True
-    return aircraft.emergency is not None
 
 
 def _vs_sort_value(ac: Aircraft) -> float | None:
@@ -260,12 +246,13 @@ def run_check(cfg: Config, source: Source) -> int:
 class App:
     """Owns the fetch thread, the shared queue, and the curses draw loop."""
 
-    def __init__(self, cfg: Config, source: Source) -> None:
+    def __init__(self, cfg: Config, source: Source, clock: Callable[[], float] = time.time) -> None:
         self.cfg = cfg
         self.source = source
+        self._clock = clock
         self._logger = logging.getLogger(_LOGGER_NAME)
 
-        self._enricher = self._build_enricher()
+        self._initial_enricher = self._build_enricher()
 
         # --- automatic registry refresh --------------------------------------------
         #: Set while a background download/rebuild is running, so the status line can say
@@ -282,44 +269,26 @@ class App:
         self._prev_messages_time: float | None = None
         self._msg_rate: float | None = None
 
-        # --- watchlist -------------------------------------------------------------
-        self._watch_entries: list[watchlist_mod.WatchEntry] = []
+        # --- watchlist, alert dispatch, sighting history ---------------------------
+        watch_entries: list[watchlist_mod.WatchEntry] = []
         if cfg.watchlist.path:
             try:
-                self._watch_entries = watchlist_mod.load(cfg.watchlist.path)
+                watch_entries = watchlist_mod.load(cfg.watchlist.path)
             except OSError as exc:
                 self._logger.warning("could not load watchlist %s: %s", cfg.watchlist.path, exc)
-
-        # --- alert dispatch --------------------------------------------------------
         # The bell is the one channel that must happen on the main thread (curses.beep()
-        # is a curses call, and the fetch thread must never make one). So the dispatcher,
-        # which runs on the fetch thread to keep webhook/subprocess latency off the UI,
-        # gets a bell_fn that only sets a flag; the event loop turns it into an actual beep.
+        # is a curses call), so its bell_fn only sets a flag the event loop turns into a beep.
+        # Slow channels (webhook, command) run on the worker, never on the fetch thread.
         self._bell_pending = threading.Event()
-        self._dispatcher = dispatch.Dispatcher(
-            cfg.alerts, bell_fn=lambda _event: self._bell_pending.set()
+        self._dispatcher = self._build_dispatcher()
+        self._dispatch_worker = dispatch.DispatchWorker(lambda ev: self._dispatcher.maybe_fire(ev))
+        self._pipeline = pipeline.Pipeline(
+            cfg,
+            enricher=self._initial_enricher,
+            watch_entries=watch_entries,
+            notify=self._dispatch_worker.submit,
+            logger=self._logger,
         )
-        #: hex -> the level it was last graded at, so transitions can be detected.
-        self._prev_levels: dict[str, AlertLevel] = {}
-
-        # --- sighting history ------------------------------------------------------
-        self._history_db = cfg.history.db or ""
-        if self._history_db:
-            try:
-                history.ensure_schema(self._history_db)
-                removed = history.prune_old(
-                    self._history_db, cfg.history.retention_days, time.time()
-                )
-                if removed:
-                    self._logger.info("pruned %d sighting(s) past retention", removed)
-            except sqlite3.Error as exc:
-                self._logger.warning(
-                    "history disabled, could not open %s: %s", self._history_db, exc
-                )
-                self._history_db = ""
-        #: hex -> running per-track aggregates, accumulated while a track is live and
-        #: written out as one row when the track finally drops.
-        self._track_stats: dict[str, dict] = {}
 
         # --- live UI state that screens mutate -------------------------------------
         #: The scope is on whenever the terminal can fit it; 'r' turns it off for anyone
@@ -330,6 +299,27 @@ class App:
         self._scroll = 0
         self._screen = None
         self._screen_name: str | None = None
+
+    @property
+    def _enricher(self) -> enrich.Enricher:
+        return self._pipeline.enricher
+
+    @_enricher.setter
+    def _enricher(self, value: enrich.Enricher) -> None:
+        self._pipeline.enricher = value
+
+    @property
+    def _watch_entries(self) -> list[watchlist_mod.WatchEntry]:
+        return self._pipeline.watch_entries
+
+    @_watch_entries.setter
+    def _watch_entries(self, value: list[watchlist_mod.WatchEntry]) -> None:
+        self._pipeline.watch_entries = value
+
+    def _build_dispatcher(self) -> dispatch.Dispatcher:
+        return dispatch.Dispatcher(
+            self.cfg.alerts, bell_fn=lambda _event: self._bell_pending.set(), now_fn=self._clock
+        )
 
     def _build_enricher(self) -> enrich.Enricher:
         """Assemble the registration/type/owner lookup chain.
@@ -405,241 +395,30 @@ class App:
         self._registry_thread = threading.Thread(target=_run, daemon=True)
         self._registry_thread.start()
 
-    def _enrich(self, aircraft: list[Aircraft]) -> None:
-        """Fill in registration/type/owner/flags for each aircraft, in place.
-
-        Enricher.apply() owns the merge rules -- it only writes fields the feed left empty,
-        so the receiver's own database always wins over anything looked up or derived here.
-        """
-        for ac in aircraft:
-            try:
-                self._enricher.apply(ac)
-            except Exception as exc:  # a lookup must never take down the fetch thread
-                self._logger.debug("enrichment failed for %s: %s", ac.hex, exc)
-
     # ------------------------------------------------------------------
     # Background fetch thread -- NEVER call any curses function from here.
     # ------------------------------------------------------------------
 
     def _fetch_loop(self, stop_event: threading.Event, out_queue: queue.Queue) -> None:
-        previous: dict[str, Aircraft] = {}
         backoff = BACKOFF_BASE_S
-
         while not stop_event.is_set():
+            due = time.monotonic() + self.cfg.source.refresh_s  # period, not fetch + refresh
             try:
                 raw = self.source.fetch(self.cfg.source.timeout_s)
-                fetched_at = time.time()
-                snapshot = normalize.parse_snapshot(raw, fetched_at)
-
-                aircraft_list: list[Aircraft] = []
-                for raw_ac in snapshot.raw_aircraft:
-                    ac = normalize.parse_aircraft(raw_ac)
-                    if ac is not None:
-                        aircraft_list.append(ac)
-
-                self._enrich(aircraft_list)
-
-                home_lat = self.cfg.home.lat
-                home_lon = self.cfg.home.lon
-                for ac in aircraft_list:
-                    if ac.lat is None or ac.lon is None:
-                        continue
-                    ac.distance_mi = geo.haversine_mi(home_lat, home_lon, ac.lat, ac.lon)
-                    ac.bearing_deg = geo.initial_bearing_deg(home_lat, home_lon, ac.lat, ac.lon)
-                    if ac.altitude_ft is not None:
-                        alt_for_elev = ac.altitude_ft
-                    elif ac.geom_altitude_ft is not None:
-                        alt_for_elev = ac.geom_altitude_ft
-                    else:
-                        alt_for_elev = 0.0
-                    ac.elevation_deg = geo.elevation_angle_deg(ac.distance_mi, alt_for_elev)
-                    cpa_dist, cpa_secs = geo.closest_point_of_approach(
-                        home_lat, home_lon, ac.lat, ac.lon, ac.track_deg, ac.ground_speed_kt
-                    )
-                    ac.cpa_distance_mi = cpa_dist
-                    ac.cpa_seconds = cpa_secs
-
-                for ac in aircraft_list:
-                    ac.is_watched = (
-                        watchlist_mod.matches(ac, self._watch_entries) is not None
-                        if self._watch_entries
-                        else False
-                    )
-
-                filtered = self._apply_filters(aircraft_list)
-
-                current_batch = {ac.hex: ac for ac in filtered}
-                tracked = tracker.update_tracks(
-                    previous,
-                    current_batch,
-                    now=fetched_at,
-                    stale_after_s=self.cfg.display.stale_after_s,
-                    linger_s=self.cfg.display.linger_s,
-                )
-                previous = tracked
-
-                graded = list(tracked.values())
-                for ac in graded:
-                    ac.alert_level = alerts.grade(
-                        ac,
-                        squawks=self.cfg.alerts.squawks,
-                        emergency_enabled=self.cfg.alerts.emergency,
-                        proximity_mi=self.cfg.filter.proximity,
-                        cpa_enabled=self.cfg.alerts.cpa_enabled,
-                        cpa_distance_mi=self.cfg.alerts.cpa_distance,
-                        cpa_horizon_s=self.cfg.alerts.cpa_horizon_s,
-                        cpa_min_gs_kt=self.cfg.alerts.cpa_min_gs_kt,
-                    )
-
-                self._dispatch_alerts(graded)
-                self._record_tracks(tracked, fetched_at)
-
-                ordered = sort_aircraft(
-                    graded, self.cfg.display.sort_key, self.cfg.display.sort_reverse
-                )
-
-                self._publish(out_queue, (snapshot, ordered, None))
+                result = self._pipeline.tick(raw, self._clock(), self._search_text)
+                display = self.cfg.display
+                ordered = sort_aircraft(result.aircraft, display.sort_key, display.sort_reverse)
+                self._publish(out_queue, (result.snapshot, ordered, None))
                 backoff = BACKOFF_BASE_S
-                stop_event.wait(self.cfg.source.refresh_s)
-
-            except SourceError as exc:
-                self._logger.warning("fetch failed: %s", exc)
+                stop_event.wait(max(0.0, due - time.monotonic()))
+            except Exception as exc:  # SourceError is expected; anything else is a bug, banner it
+                if isinstance(exc, SourceError):
+                    self._logger.warning("fetch failed: %s", exc)
+                else:
+                    self._logger.exception("unexpected error in fetch loop: %s", exc)
                 self._publish(out_queue, (None, [], str(exc)))
                 stop_event.wait(backoff)
                 backoff = min(backoff * 2, self.cfg.source.backoff_max_s)
-            except Exception as exc:  # a bug must show up as a banner, not kill the thread
-                self._logger.exception("unexpected error in fetch loop: %s", exc)
-                self._publish(out_queue, (None, [], str(exc)))
-                stop_event.wait(backoff)
-                backoff = min(backoff * 2, self.cfg.source.backoff_max_s)
-
-    def _apply_filters(self, aircraft_list: list[Aircraft]) -> list[Aircraft]:
-        """Apply every [filter] setting plus the live search box.
-
-        An aircraft graded as an emergency bypasses the radius check (and only that check)
-        when alerts.emergency_ignore_radius is set: a 7700 squawk 20 miles out is exactly
-        the thing you do not want filtered off the screen.
-        """
-        f = self.cfg.filter
-        ignore_radius_for_emergency = self.cfg.alerts.emergency_ignore_radius
-        needle = self._search_text.strip().lower()
-
-        kept: list[Aircraft] = []
-        for ac in aircraft_list:
-            is_emergency = _is_emergency(self.cfg, ac)
-
-            within_radius = ac.distance_mi is not None and ac.distance_mi <= f.radius
-            if not within_radius and not (ignore_radius_for_emergency and is_emergency):
-                continue
-            if f.hide_ground and ac.on_ground:
-                continue
-            if not f.include_nonicao and not ac.is_icao:
-                continue
-            if ac.altitude_ft is not None and not (f.min_alt_ft <= ac.altitude_ft <= f.max_alt_ft):
-                continue
-            if needle and not self._matches_search(ac, needle):
-                continue
-            kept.append(ac)
-        return kept
-
-    @staticmethod
-    def _matches_search(ac: Aircraft, needle: str) -> bool:
-        haystack = (ac.flight, ac.hex, ac.registration, ac.owner_name, ac.type_code)
-        return any(field and needle in field.lower() for field in haystack)
-
-    def _dispatch_alerts(self, graded: list[Aircraft]) -> None:
-        """Fire alert notifications for level transitions and watchlist matches.
-
-        Runs on the fetch thread so a slow webhook or notify-send can never stall the
-        display; the bell is the exception and is handed to the main thread via a flag.
-        """
-        seen: set[str] = set()
-        for ac in graded:
-            seen.add(ac.hex)
-            previous = self._prev_levels.get(ac.hex, AlertLevel.NONE)
-            event = dispatch.build_event(ac, ac.alert_level, previous, self.cfg.alerts.events)
-            if event is None and ac.is_watched and previous == AlertLevel.NONE:
-                # A watchlist hit is not an AlertLevel transition, so it goes through the
-                # same gate under its own event name.
-                event = dispatch.build_event(
-                    ac,
-                    ac.alert_level,
-                    previous,
-                    self.cfg.alerts.events,
-                    event_name_override="watchlist",
-                )
-            if event is not None:
-                try:
-                    self._dispatcher.maybe_fire(event)
-                except Exception as exc:  # never let a notification kill the fetch thread
-                    self._logger.warning("alert dispatch failed for %s: %s", ac.hex, exc)
-            self._prev_levels[ac.hex] = ac.alert_level
-
-        for gone in [h for h in self._prev_levels if h not in seen]:
-            del self._prev_levels[gone]
-
-    def _record_tracks(self, tracked: dict[str, Aircraft], now: float) -> None:
-        """Accumulate per-track aggregates, and write a sighting row when a track drops.
-
-        tracker.update_tracks() ages a vanished aircraft out after the linger window, so
-        "no longer in tracked" is exactly the moment its track ended and the summary can
-        be persisted.
-        """
-        if not self._history_db:
-            return
-
-        for hexid, ac in tracked.items():
-            stats = self._track_stats.get(hexid)
-            if stats is None:
-                stats = {
-                    "first_seen": ac.first_seen or now,
-                    "min_distance_mi": None,
-                    "min_distance_at": None,
-                    "max_altitude_ft": None,
-                    "max_gs_kt": None,
-                    "squawks": set(),
-                    "had_emergency": False,
-                    "aircraft": ac,
-                }
-                self._track_stats[hexid] = stats
-
-            stats["aircraft"] = ac
-            stats["last_seen"] = ac.last_seen or now
-            if ac.distance_mi is not None and (
-                stats["min_distance_mi"] is None or ac.distance_mi < stats["min_distance_mi"]
-            ):
-                stats["min_distance_mi"] = ac.distance_mi
-                stats["min_distance_at"] = now
-            if ac.altitude_ft is not None and (
-                stats["max_altitude_ft"] is None or ac.altitude_ft > stats["max_altitude_ft"]
-            ):
-                stats["max_altitude_ft"] = ac.altitude_ft
-            if ac.ground_speed_kt is not None and (
-                stats["max_gs_kt"] is None or ac.ground_speed_kt > stats["max_gs_kt"]
-            ):
-                stats["max_gs_kt"] = ac.ground_speed_kt
-            if ac.squawk:
-                stats["squawks"].add(ac.squawk)
-            if ac.alert_level == AlertLevel.EMERGENCY:
-                stats["had_emergency"] = True
-
-        for hexid in [h for h in self._track_stats if h not in tracked]:
-            stats = self._track_stats.pop(hexid)
-            try:
-                history.record_close(
-                    self._history_db,
-                    stats["aircraft"],
-                    first_seen=stats["first_seen"],
-                    last_seen=stats.get("last_seen", now),
-                    min_distance_mi=stats["min_distance_mi"],
-                    min_distance_at=stats["min_distance_at"],
-                    max_altitude_ft=stats["max_altitude_ft"],
-                    max_gs_kt=stats["max_gs_kt"],
-                    squawks_seen=sorted(stats["squawks"]),
-                    had_emergency=stats["had_emergency"],
-                )
-            except sqlite3.Error as exc:
-                self._logger.warning("could not record sighting for %s: %s", hexid, exc)
 
     @staticmethod
     def _publish(
@@ -1084,12 +863,11 @@ class App:
         new_cfg._args = self.cfg._args
         new_cfg._config_path = self.cfg._config_path
         self.cfg = new_cfg
+        self._pipeline.cfg = new_cfg
 
         # Settings that feed long-lived objects have to be re-read, not just stored.
         self._enricher = self._build_enricher()
-        self._dispatcher = dispatch.Dispatcher(
-            self.cfg.alerts, bell_fn=lambda _event: self._bell_pending.set()
-        )
+        self._dispatcher = self._build_dispatcher()
 
         if getattr(screen, "save_requested", False):
             default_path = os.path.expanduser("~/.config/adsbtui/config.toml")
@@ -1257,3 +1035,4 @@ class App:
         finally:
             stop_event.set()
             fetch_thread.join(timeout=2.0)
+            self._dispatch_worker.close(timeout=0.5)
