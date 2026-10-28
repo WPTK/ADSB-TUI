@@ -235,6 +235,15 @@ class Pipeline:
         #: The feed's last distinct `now` and the tick time it first appeared.
         self._feed_now: float | None = None
         self._feed_changed_at: float | None = None
+        #: Set (from any thread) when a filter changed; the next tick prunes the tracks.
+        self._prune_tracks = False
+
+    def drop_filtered_lingerers(self) -> None:
+        """Stop tracks that fail the filter as it is now from lingering for ``linger_s``.
+
+        Takes effect on the next tick, on the thread that owns the tracks.
+        """
+        self._prune_tracks = True
 
     def tick(self, raw: Any, now: float, search_text: str = "") -> TickResult:
         """Run one cycle over an already-fetched payload and return what happened."""
@@ -249,6 +258,13 @@ class Pipeline:
         # Tracking runs on the filtered set (the set the TUI shows), so a track "closes"
         # when the aircraft leaves the configured radius, not only when the feed forgets it.
         filtered = apply_filters(aircraft_list, self.cfg, search_text)
+        if self._prune_tracks:
+            self._prune_tracks = False
+            self._tracked = {
+                hex_id: ac
+                for hex_id, ac in self._tracked.items()
+                if apply_filters([ac], self.cfg, search_text)
+            }
         self._tracked = tracker.update_tracks(
             self._tracked,
             {ac.hex: ac for ac in filtered},

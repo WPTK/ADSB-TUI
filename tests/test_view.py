@@ -93,3 +93,14 @@ def test_the_cursor_keeps_its_row_when_its_aircraft_leaves():
     view.move_cursor(1)
     view.apply(_frame(2, 105.0, [_ac("a"), _ac("c"), _ac("d")]))
     assert view.cursor == 1 and view.selected_hex == "c"
+
+
+def test_a_new_sort_reorders_the_rows_without_a_new_frame():
+    view = ViewState(Config())
+    view.cfg.display.sort_key, view.cfg.display.sort_reverse = "callsign", False
+    rows = [Aircraft(hex=h, is_icao=True, flight=f) for h, f in (("1", "BBB"), ("2", "AAA"))]
+    view.apply(_frame(1, 100.0, rows))
+    assert [a.flight for a in view.rows] == ["AAA", "BBB"]
+    view.cfg.display.sort_reverse = True
+    view.resort()
+    assert [a.flight for a in view.rows] == ["BBB", "AAA"]

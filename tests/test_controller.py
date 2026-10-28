@@ -141,7 +141,7 @@ def test_a_saved_settings_screen_tells_the_effects_in_order():
     screen.save_requested = True
     controller.screens.close()
     assert view.cfg is edited and view.cfg.filter.radius == 42.0
-    assert effects.calls == ["set_pipeline_cfg", "set_enricher", "set_dispatcher"]
+    assert effects.calls == ["set_pipeline_cfg", "set_enricher", "set_dispatcher", "refresh_now"]
     assert effects.saved and view.note() == "settings saved"
     assert controller.screens.edited == set()
 
@@ -169,3 +169,9 @@ def test_escape_in_filters_leaves_the_filter_alone():
     assert view.screen.handle_key(27) == "close"
     controller.screens.close()
     assert view.cfg.filter.hide_ground is before and view.search_text == ""
+
+
+def test_a_radius_change_asks_for_a_fresh_fetch():
+    controller, _, effects = _controller()
+    _press(controller, ord("+"))
+    assert effects.calls == ["refresh_now"]

@@ -13,6 +13,7 @@ from typing import Any
 from adsbtui.config import Config
 from adsbtui.model import Aircraft, Snapshot
 from adsbtui.ui.frame import Frame
+from adsbtui.ui.sorting import sort_aircraft
 
 
 @dataclass
@@ -21,7 +22,11 @@ class ViewState:
     now: float = 0.0
     frame: Frame | None = None  #: newest frame, healthy or not
     last_ok: Frame | None = None  #: newest healthy frame
-    rows: list[Aircraft] = field(default_factory=list)  #: what the table shows
+    rows: list[Aircraft] = field(default_factory=list)  #: what the table shows, sorted
+    unsorted: list[Aircraft] = field(
+        default_factory=list
+    )  #: the same aircraft, as the frame had them
+    _sorted_by: tuple[str, bool] | None = None
     paused: bool = False
     radar_on: bool = True
     cursor: int = 0
@@ -75,8 +80,21 @@ class ViewState:
         if frame.snapshot is not None:
             self._update_msg_rate(frame.snapshot)
         if not self.paused:
-            self.rows = frame.aircraft
-            self._follow_selection()
+            self.unsorted = frame.aircraft
+            self._sort()
+
+    def resort(self) -> None:
+        """Re-sort the rows if the sort key or direction changed since they were sorted."""
+        display = self.cfg.display
+        if self._sorted_by != (display.sort_key, display.sort_reverse):
+            self._sort()
+            self.dirty = True
+
+    def _sort(self) -> None:
+        display = self.cfg.display
+        self._sorted_by = (display.sort_key, display.sort_reverse)
+        self.rows = sort_aircraft(self.unsorted, display.sort_key, display.sort_reverse)
+        self._follow_selection()
 
     def _update_msg_rate(self, snapshot: Snapshot) -> None:
         """Rolling messages/sec from two successive snapshots' cumulative counters. Resets to

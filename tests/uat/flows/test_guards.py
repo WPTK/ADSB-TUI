@@ -7,12 +7,13 @@ were asserted before, and each one lives on a seam the split moves.
 
 from __future__ import annotations
 
+import re
 import time
 
 import fakefeed
 import pytest
 from fakefeed import HOME_LAT, HOME_LON, ac
-from keys import order, press, selected_hex
+from keys import FIXTURE_ROWS, order, press, selected_hex
 
 from adsbtui.ui.keys import BINDINGS
 
@@ -292,3 +293,26 @@ def test_a_flash_message_expires(spawn):
     # Lasts 6 s from when it was set, not one redraw. The clock starts when the poll first
     # sees it, which under load can be a couple of seconds late, so the bound is loose.
     assert time.monotonic() - shown_at > 2.0
+
+
+# --------------------------------------------------- G-R changes show without waiting a poll
+
+#: The real default period. Every other flow polls at 0.3 s, which hides a change that only
+#: shows on the next fetch (A45).
+SLOW_FEED = {"ADSBTUI_SOURCE_REFRESH_S": "5"}
+
+
+def test_reversing_the_sort_shows_before_the_next_poll(spawn):
+    term = spawn(env=SLOW_FEED)
+    term.wait_for("UAL123")
+    before = order(term, FIXTURE_ROWS)
+    press(term, "S")
+    term.wait_for(lambda t: order(t, FIXTURE_ROWS) == before[::-1], timeout=3)
+
+
+def test_a_smaller_radius_shows_before_the_next_poll(spawn):
+    term = spawn(env=SLOW_FEED)
+    term.wait_for("5 aircraft")
+    for _ in range(12):
+        press(term, "-")
+    term.wait_for(lambda t: re.search(r"\b[0-4] aircraft", t.text) is not None, timeout=3)

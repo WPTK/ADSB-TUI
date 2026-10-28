@@ -55,7 +55,6 @@ from adsbtui.sources import Source, SourceError
 from adsbtui.ui.controller import Controller, Outcome
 from adsbtui.ui.frame import Frame
 from adsbtui.ui.render import Layout, Renderer, layout_for
-from adsbtui.ui.sorting import sort_aircraft
 from adsbtui.ui.view import ViewState
 
 #: getch() timeout in milliseconds. Must be <= 250 per the task's requirement so the UI
@@ -143,6 +142,7 @@ class App:
         )
 
         self._frame_seq = 0
+        self._wake = threading.Event()
 
     def _build_dispatcher(self) -> dispatch.Dispatcher:
         return dispatch.Dispatcher(
@@ -235,20 +235,28 @@ class App:
                 raw = self.source.fetch(self.cfg.source.timeout_s)
                 now = self._clock()
                 result = self._pipeline.tick(raw, now, self.view.search_text)
-                display = self.cfg.display
-                ordered = sort_aircraft(result.aircraft, display.sort_key, display.sort_reverse)
-                frame = self._frame(now, result.snapshot, ordered, None, result.feed_stale)
+                frame = self._frame(now, result.snapshot, result.aircraft, None, result.feed_stale)
                 self._publish(out_queue, frame)
                 backoff = BACKOFF_BASE_S
-                stop_event.wait(max(0.0, due - self._monotonic()))
+                self._sleep(stop_event, due - self._monotonic())
             except Exception as exc:  # SourceError is expected; anything else is a bug, banner it
                 if isinstance(exc, SourceError):
                     self._logger.warning("fetch failed: %s", exc)
                 else:
                     self._logger.exception("unexpected error in fetch loop: %s", exc)
                 self._publish(out_queue, self._frame(self._clock(), None, [], str(exc), False))
-                stop_event.wait(backoff)
+                self._sleep(stop_event, backoff)
                 backoff = min(backoff * 2, self.cfg.source.backoff_max_s)
+
+    def _sleep(self, stop_event: threading.Event, seconds: float) -> None:
+        """Wait out the fetch period, ending early on stop or on ``refresh_now``."""
+        end = self._monotonic() + seconds
+        while not stop_event.is_set() and not self._wake.is_set():
+            left = end - self._monotonic()
+            if left <= 0:
+                break
+            stop_event.wait(min(left, 0.1))
+        self._wake.clear()
 
     def _frame(
         self,
@@ -294,7 +302,9 @@ class App:
         return self._pipeline.watch_entries
 
     def refresh_now(self) -> None:
-        """Nothing waits on the fetch period yet; B2-8 wakes the fetch loop here."""
+        """A filter, radius or search change: drop what no longer passes and fetch again."""
+        self._pipeline.drop_filtered_lingerers()
+        self._wake.set()
 
     def set_enricher(self) -> None:
         self._pipeline.enricher = self._build_enricher()
@@ -331,6 +341,7 @@ class App:
 
         while True:
             view.tick(self._clock())
+            view.resort()
             while True:
                 try:
                     view.apply(out_queue.get_nowait())
@@ -389,5 +400,6 @@ class App:
             return 0
         finally:
             stop_event.set()
+            self._wake.set()
             fetch_thread.join(timeout=2.0)
             self._dispatch_worker.close(timeout=0.5)

@@ -69,6 +69,7 @@ class Controller:
             f.radius += 1.0
         else:
             f.radius = max(1.0, f.radius - 1.0)
+        self.effects.refresh_now()
 
     def _up(self, key: int, layout: Layout) -> None:
         self.view.move_cursor(self.view.cursor - 1)
