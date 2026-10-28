@@ -241,7 +241,7 @@ def refresh_registry(cfg: Config, logger: logging.Logger | None = None) -> bool:
     log = logger if logger is not None else logging.getLogger(_LOGGER_NAME)
     db_path = os.path.expanduser(cfg.registry.db)
     try:
-        result = registry_update.build_from_tar1090(registry_update.TAR1090_URL, db_path)
+        result = registry_update.build_from_tar1090(cfg.registry.tar1090_url, db_path)
     except Exception as exc:
         log.warning("registry update failed: %s", exc)
         return False
