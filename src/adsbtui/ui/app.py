@@ -52,6 +52,7 @@ from adsbtui.config import Config, default_config_path, layer_for_save
 from adsbtui.enrich import registry_update
 from adsbtui.model import Aircraft
 from adsbtui.sources import Source, SourceError
+from adsbtui.sources.demo import DemoSource
 from adsbtui.ui.controller import Controller, Outcome
 from adsbtui.ui.frame import Frame
 from adsbtui.ui.render import Layout, Renderer, layout_for
@@ -105,7 +106,9 @@ class App:
         self._clock = clock
         #: Schedules the fetch period; immune to wall-clock steps.
         self._monotonic = monotonic
-        self.view = ViewState(cfg)
+        #: Scripted traffic: nothing it shows may be sent anywhere or saved.
+        self.demo = isinstance(source, DemoSource)
+        self.view = ViewState(cfg, demo=self.demo)
         self.controller = Controller(self.view, self)
         self._logger = logging.getLogger(_LOGGER_NAME)
 
@@ -137,7 +140,7 @@ class App:
             cfg,
             enricher=self._initial_enricher,
             watch_entries=watch_entries,
-            notify=self._dispatch_worker.submit,
+            notify=None if self.demo else self._dispatch_worker.submit,
             logger=self._logger,
         )
 
@@ -320,6 +323,8 @@ class App:
         self._pipeline.cfg = cfg
 
     def save_config(self, cfg: Config, edited: set[tuple[str, str]]) -> str | None:
+        if self.demo:
+            return "demo mode: settings are not saved"
         path = cfg._config_path or default_config_path()
         layer = layer_for_save(cfg._file_layer, cfg, edited)
         try:

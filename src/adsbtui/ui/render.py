@@ -224,6 +224,7 @@ class Renderer:
             clock=view.clock_text(),
             note=view.note(),
             feed_stale=view.feed_stale,
+            demo=view.demo,
         )
         bad = error is not None or view.feed_stale
         _safe_addstr(stdscr, 0, 0, status, attrs.get("bad" if bad else "ok", header_attr))

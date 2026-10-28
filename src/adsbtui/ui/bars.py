@@ -48,6 +48,7 @@ def status_line_text(
     clock: str | None = None,
     note: str | None = None,
     feed_stale: bool = False,
+    demo: bool = False,
 ) -> str:
     """Build the one live-state line: link health, what is on screen, and any running job.
 
@@ -61,6 +62,8 @@ def status_line_text(
     """
     parts: list[str] = []
 
+    if demo:
+        parts.append("DEMO")
     if paused:
         parts.append("PAUSED")
 

@@ -28,6 +28,7 @@ class ViewState:
     )  #: the same aircraft, as the frame had them
     _sorted_by: tuple[str, bool] | None = None
     paused: bool = False
+    demo: bool = False  #: scripted traffic: the status line says so
     radar_on: bool = True
     cursor: int = 0
     #: The aircraft under the cursor. New frames move the cursor to follow it; the index is
