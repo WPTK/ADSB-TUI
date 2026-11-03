@@ -5,10 +5,9 @@ __pycache__/
 venv/
 build/
 dist/
+.env
 *.log
 *.sqlite
 *.sqlite-journal
 config.toml
 MASTER.csv
-.pytest_cache/
-.ruff_cache/
