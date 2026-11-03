@@ -7,7 +7,7 @@ to a display unit system happens only in `units.py` / the UI layer, never here o
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 
 
@@ -94,8 +94,6 @@ class Aircraft:
     is_watched: bool = False
 
     alert_level: AlertLevel = AlertLevel.NONE
-
-    extra: dict = field(default_factory=dict)  # unmodeled raw fields, for the detail pane
 
     @property
     def is_military(self) -> bool:

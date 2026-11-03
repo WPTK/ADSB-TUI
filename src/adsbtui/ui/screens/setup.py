@@ -27,7 +27,7 @@ import curses
 import json
 import urllib.error
 import urllib.request
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -202,13 +202,24 @@ def _probe_label(result: ProbeResult) -> str:
     return f"{result.candidate}  --  no data ({result.error})"
 
 
+def _seed_number(seed: Mapping[str, Any], key: str) -> str:
+    """A seeded numeric answer as field text, or "" when absent or not a number."""
+    try:
+        return repr(float(seed[key]))
+    except (KeyError, TypeError, ValueError):
+        return ""
+
+
 class SetupScreen:
     """The four-step first-run wizard, producing a ready-to-write Config.
 
     prober(host_or_url) -> sequence of ProbeResult and location_fetcher(aircraft_url) ->
     (lat, lon) or None are injection points for the two side-effecting lookups; both
     default to this module's real implementations. initial_host pre-fills the receiver
-    field, e.g. from a --url the user already passed.
+    field, e.g. from a --url the user already passed. seed is the flat "section.key" ->
+    value mapping from the environment and command line (config.env_overrides and
+    cli_overrides): whatever it holds pre-fills the matching answer, and the user still
+    confirms each step.
     """
 
     def __init__(
@@ -216,6 +227,7 @@ class SetupScreen:
         prober: Callable[[str], Sequence[ProbeResult]] | None = None,
         location_fetcher: Callable[[str], tuple[float, float] | None] | None = None,
         initial_host: str = "",
+        seed: Mapping[str, Any] | None = None,
     ) -> None:
         self._prober = prober if prober is not None else probe_sources
         self._location_fetcher = (
@@ -223,6 +235,8 @@ class SetupScreen:
         )
 
         defaults = Config()
+        seed = seed or {}
+        initial_host = initial_host or str(seed.get("source.url") or "")
         self._step = STEP_RECEIVER
         self.applied = False
         self.error: str | None = None
@@ -233,12 +247,19 @@ class SetupScreen:
         self._picker: ListPicker | None = None
         self._picker_focused = False
 
-        self._lat_field = NumberField()
-        self._lon_field = NumberField()
+        self._lat_field = NumberField(initial=_seed_number(seed, "home.lat"))
+        self._lon_field = NumberField(initial=_seed_number(seed, "home.lon"))
         self._home_form = Form([("Latitude", self._lat_field), ("Longitude", self._lon_field)])
 
-        self._units_select = Select(_UNIT_CHOICES)
-        self._radius_field = NumberField(initial=repr(defaults.filter.radius))
+        unit_values = [value for value, _label in _UNIT_CHOICES]
+        seeded_units = str(seed.get("display.units") or "")
+        self._units_select = Select(
+            _UNIT_CHOICES,
+            initial_index=unit_values.index(seeded_units) if seeded_units in unit_values else 0,
+        )
+        self._radius_field = NumberField(
+            initial=_seed_number(seed, "filter.radius") or repr(defaults.filter.radius)
+        )
         self._units_form = Form(
             [("Units", self._units_select), ("Radius (mi)", self._radius_field)]
         )

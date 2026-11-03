@@ -29,6 +29,7 @@ from .config import ConfigError, build_argparser, load_config
 from .logsetup import configure_logging
 from .output import run_batch, run_headless, run_once, run_watch
 from .sources import SourceError, make_source
+from .sources.demo import DemoSource, apply_demo_settings
 from .ui.app import App, run_check
 
 log = logging.getLogger("adsbtui")
@@ -63,6 +64,20 @@ def _parse_args_quietly(argv: list[str] | None):
         return None
 
 
+def _terminal_can_draw() -> bool:
+    """False when TERM names a terminal without cursor addressing (TERM=dumb): curses would
+    start and paint a blank screen. An unset or unknown TERM is left to curses, which
+    already refuses it with its own message. Windows has no terminfo (PDCurses answers None
+    for every capability), so the check cannot say anything there."""
+    if sys.platform == "win32":
+        return True
+    try:
+        curses.setupterm()
+        return curses.tigetstr("cup") is not None
+    except curses.error:
+        return True
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the `adsbtui` console script. Returns a process exit code.
 
@@ -71,6 +86,8 @@ def main(argv: list[str] | None = None) -> int:
     """
     try:
         cfg = load_config(argv)
+        if getattr(cfg._args, "demo", False):
+            apply_demo_settings(cfg)
     except ConfigError as exc:
         # A person at a terminal with no config yet is exactly who the setup wizard is
         # for, so offer it rather than sending them to the README. Scripted runs and
@@ -96,8 +113,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     log.info("adsbtui %s starting (config: %s)", __version__, cfg._config_path or "defaults")
 
+    demo = bool(getattr(cfg._args, "demo", False))
     try:
-        source = make_source(cfg.source.url, max_bytes=cfg.source.max_bytes)
+        if demo:
+            source = DemoSource(cfg.home.lat, cfg.home.lon)
+        else:
+            source = make_source(cfg.source.url, max_bytes=cfg.source.max_bytes)
     except (SourceError, ValueError) as exc:
         print(f"Cannot use source {cfg.source.url!r}: {exc}", file=sys.stderr)
         return 2
@@ -131,6 +152,10 @@ def main(argv: list[str] | None = None) -> int:
         return run_headless(cfg, source, stop_predicate=stop.is_set)
 
     # Default: the curses TUI. curses.wrapper restores the terminal even if run() raises.
+    if not _terminal_can_draw():
+        print("This terminal cannot move the cursor, so the TUI cannot draw.", file=sys.stderr)
+        print("Try 'adsbtui --once' instead, or set TERM to a real terminal.", file=sys.stderr)
+        return 2
     app = App(cfg, source)
     try:
         return curses.wrapper(app.run)

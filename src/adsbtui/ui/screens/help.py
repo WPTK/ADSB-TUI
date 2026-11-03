@@ -8,6 +8,7 @@ back to the caller as a short string ("close" here, since any key dismisses this
 
 from __future__ import annotations
 
+import curses
 from collections.abc import Mapping
 
 
@@ -59,6 +60,8 @@ class HelpScreen:
     def __init__(self, keymap: Mapping[str, str], version: str) -> None:
         self._keymap: dict[str, str] = dict(keymap)
         self._version = version
+        self._offset = 0  #: first body line shown; clamped when rendering
+        self._page = 10  #: lines per PgUp/PgDn, set from the last render
 
     @property
     def title(self) -> str:
@@ -73,8 +76,21 @@ class HelpScreen:
         return self._version
 
     def handle_key(self, key: int) -> str | None:
-        """Any key at all dismisses this overlay."""
-        return "close"
+        """Scroll keys move the view; any other key dismisses the overlay."""
+        step = {
+            curses.KEY_UP: -1,
+            ord("k"): -1,
+            curses.KEY_DOWN: 1,
+            ord("j"): 1,
+            curses.KEY_PPAGE: -self._page,
+            curses.KEY_NPAGE: self._page,
+            curses.KEY_HOME: -(10**6),
+            curses.KEY_END: 10**6,
+        }.get(key)
+        if step is None:
+            return "close"
+        self._offset = max(0, self._offset + step)
+        return None
 
     def render_lines(self, width: int, height: int) -> list[str]:
         if height <= 0 or width <= 0:
@@ -91,11 +107,17 @@ class HelpScreen:
             _clip(f"  {name:<{name_col}}  {meaning}", width) for name, meaning in COLUMN_GLOSSARY
         ]
 
-        footer = ["", _clip(f"Version: {self._version}", width), _clip("Any key closes", width)]
+        footer = [
+            "",
+            _clip(f"Version: {self._version}", width),
+            _clip("Up/Down/PgUp/PgDn scroll; any other key closes", width),
+        ]
 
-        # The glossary is the part that yields on a short terminal: losing it costs a
-        # reference the README also carries, while losing the key list or the footer would
-        # leave someone looking at a box with no way out of it named anywhere.
-        if len(keys) + len(glossary) + len(footer) <= height:
-            return keys + glossary + footer
-        return (keys + footer)[:height]
+        body = keys + glossary
+        if len(body) + len(footer) <= height:
+            return body + footer
+        # Too tall: scroll the body and keep the footer, which names the way out.
+        room = max(0, height - len(footer))
+        self._page = max(1, room - 1)
+        self._offset = min(self._offset, len(body) - room)
+        return (body[self._offset : self._offset + room] + footer)[:height]

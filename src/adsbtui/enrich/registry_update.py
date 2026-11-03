@@ -44,12 +44,10 @@ import zipfile
 import zlib
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
+from typing import Any
 
 from adsbtui import __version__
 from adsbtui.enrich.derived import normalize_hex
-
-TAR1090_URL = "https://raw.githubusercontent.com/wiedehopf/tar1090-db/csv/aircraft.csv.gz"
-FAA_URL = "https://registry.faa.gov/database/ReleasableAircraft.zip"
 
 SOURCE_TAR1090 = "tar1090"
 SOURCE_FAA = "faa"
@@ -58,7 +56,16 @@ SOURCE_FAA = "faa"
 #: a redirect to something enormous cannot fill the user's disk.
 MAX_DOWNLOAD_BYTES = 256 * 1024 * 1024
 
+#: A build whose row count falls below this share of the previous build's is refused: a
+#: truncated-but-valid upstream file must not replace a good database. force=True overrides.
+MIN_ROW_RATIO = 0.5
+
+#: One retry after a server error or a timeout, after this many seconds.
+_RETRY_DELAY_S = 2.0
+
 _USER_AGENT = f"adsb-tui/{__version__} (+https://github.com/wptk/adsb-tui)"
+#: Last checked 2026-10 (Chrome 130). If the FAA starts answering 403 again, update this
+#: string first; the weekly live-registry job exists to notice.
 #: registry.faa.gov sits behind an Akamai rule that answers 403 to any User-Agent it does
 #: not recognize as a browser, ours included (issue #7). The file is public domain and the
 #: FAA publishes it for bulk download, so the FAA request alone presents a browser UA.
@@ -78,6 +85,10 @@ _READ_ERRORS = (OSError, EOFError, csv.Error, UnicodeError, zipfile.BadZipFile, 
 
 class RegistryError(Exception):
     """A registry build or download failed. The database on disk is left untouched."""
+
+
+class TransientDownloadError(RegistryError):
+    """A download failure worth one retry: a 5xx answer, a timeout or a dropped connection."""
 
 
 _SCHEMA = """
@@ -158,6 +169,21 @@ def download(
     url: str,
     dest: str,
     progress_fn: ProgressFn | None = None,
+    **kwargs: Any,
+) -> DownloadResult:
+    """_download_once, retried one time after a server error or timeout (see there for the
+    arguments). A 4xx, a size-limit refusal or a filesystem error is not retried."""
+    try:
+        return _download_once(url, dest, progress_fn, **kwargs)
+    except TransientDownloadError:
+        time.sleep(_RETRY_DELAY_S)
+        return _download_once(url, dest, progress_fn, **kwargs)
+
+
+def _download_once(
+    url: str,
+    dest: str,
+    progress_fn: ProgressFn | None = None,
     *,
     timeout: float = 60.0,
     max_bytes: int = MAX_DOWNLOAD_BYTES,
@@ -232,10 +258,13 @@ def download(
                 etag=etag,
                 last_modified=last_modified,
             )
-        raise RegistryError(f"could not download {url}: HTTP {exc.code} {exc.reason}") from exc
+        error = TransientDownloadError if exc.code >= 500 else RegistryError
+        raise error(f"could not download {url}: HTTP {exc.code} {exc.reason}") from exc
     except RegistryError:
         raise
-    except (urllib.error.URLError, OSError, ValueError) as exc:
+    except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+        raise TransientDownloadError(f"could not download {url}: {exc}") from exc
+    except (OSError, ValueError) as exc:
         raise RegistryError(f"could not download {url}: {exc}") from exc
 
     if progress_fn is not None:
@@ -358,6 +387,7 @@ def _write_db(
     etag: str | None,
     last_modified: str | None,
     rows: Iterable[Row],
+    previous_rows: int = 0,
 ) -> int:
     """Build a complete database from rows and atomically move it onto db_path.
 
@@ -381,6 +411,12 @@ def _write_db(
                 count += len(batch)
             if count == 0:
                 raise RegistryError(f"{source} source produced no usable rows")
+            if previous_rows and count < previous_rows * MIN_ROW_RATIO:
+                raise RegistryError(
+                    f"{source} source has {count} rows, under {MIN_ROW_RATIO:.0%} of the "
+                    f"{previous_rows} already installed; keeping the current database "
+                    "(force an update to accept it)"
+                )
 
             _preserve_other_sources(conn, db_path, source)
             conn.execute(
@@ -667,7 +703,13 @@ def _build(
 
         try:
             count = _write_db(
-                db_path, source, url, etag, last_modified, row_reader(local_path, progress_fn)
+                db_path,
+                source,
+                url,
+                etag,
+                last_modified,
+                row_reader(local_path, progress_fn),
+                previous_rows=0 if force or previous is None else previous.row_count,
             )
         except RegistryError:
             raise

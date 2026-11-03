@@ -74,13 +74,13 @@ def _format_vertical_rate(aircraft: Aircraft, unit: str) -> str:
 
 
 def _format_track(track_deg: float | None) -> str:
-    return "N/A" if track_deg is None else f"{track_deg:03.0f}°"
+    return "N/A" if track_deg is None else f"{round(track_deg) % 360:03d}°"
 
 
 def _format_bearing(bearing_deg: float | None) -> str:
     if bearing_deg is None:
         return "N/A"
-    return f"{compass_point(bearing_deg)} {bearing_deg:03.0f}°"
+    return f"{compass_point(bearing_deg)} {round(bearing_deg) % 360:03d}°"
 
 
 def _format_closest_approach(aircraft: Aircraft, distance_unit: str) -> str:

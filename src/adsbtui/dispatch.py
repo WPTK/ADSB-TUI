@@ -30,10 +30,13 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 import platform
+import queue
 import shlex
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -359,3 +362,41 @@ class Dispatcher:
         if fired:
             self._cooldowns[key] = now
         return fired
+
+
+class DispatchWorker:
+    """Runs `fire(event)` for each submitted event on one background thread.
+
+    Webhook and command delivery block for seconds (each has its own timeout), so doing them
+    on the fetch thread delayed the next poll by that long per event. submit() only enqueues;
+    when the queue is full the new event is dropped and logged, since by then the oldest ones
+    are already stale news. close() lets what is queued finish, up to `timeout` seconds.
+    """
+
+    def __init__(self, fire: Callable[[AlertEvent], Any], maxsize: int = 64) -> None:
+        self._fire = fire
+        self._queue: queue.Queue[AlertEvent | None] = queue.Queue(maxsize=maxsize)
+        self._log = logging.getLogger("adsbtui")
+        self._thread = threading.Thread(target=self._run, name="alert-dispatch", daemon=True)
+        self._thread.start()
+
+    def submit(self, event: AlertEvent) -> None:
+        try:
+            self._queue.put_nowait(event)
+        except queue.Full:
+            self._log.warning("alert queue full, dropping %s for %s", event.event_name, event.hex)
+
+    def _run(self) -> None:
+        while True:
+            event = self._queue.get()
+            if event is None:
+                return
+            try:
+                self._fire(event)
+            except Exception as exc:  # one bad channel must not stop the worker
+                self._log.warning("alert dispatch failed for %s: %s", event.hex, exc)
+
+    def close(self, timeout: float = 2.0) -> None:
+        with contextlib.suppress(queue.Full):
+            self._queue.put_nowait(None)
+        self._thread.join(timeout)

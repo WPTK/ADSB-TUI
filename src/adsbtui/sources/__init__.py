@@ -10,6 +10,7 @@ function that picks the right concrete Source (HTTP or local file) from a plain 
 
 from __future__ import annotations
 
+import json
 from typing import Protocol, runtime_checkable
 
 DEFAULT_MAX_BYTES = 8_000_000
@@ -33,6 +34,26 @@ class SourceInvalidData(SourceError):
     or not a dict with an "aircraft" list."""
 
 
+def parse_payload(body: bytes, where: str) -> dict:
+    """Parse and shape-check an aircraft.json body, raising only SourceInvalidData.
+
+    json.loads can raise more than JSONDecodeError on hostile input: bytes that are not
+    UTF-8 give UnicodeDecodeError, and deeply nested arrays give RecursionError. Both are
+    just "this response is unusable", so both become SourceInvalidData here instead of
+    escaping the Source contract as a traceback.
+    """
+    try:
+        data = json.loads(body)
+    except RecursionError as exc:
+        raise SourceInvalidData(f"{where} is nested too deeply to be aircraft.json") from exc
+    except ValueError as exc:  # JSONDecodeError and UnicodeDecodeError are both ValueErrors
+        raise SourceInvalidData(f"{where} was not valid JSON: {exc}") from exc
+
+    if not isinstance(data, dict) or not isinstance(data.get("aircraft"), list):
+        raise SourceInvalidData(f"{where} was not an aircraft.json object with an 'aircraft' list")
+    return data
+
+
 @runtime_checkable
 class Source(Protocol):
     """Anything that can fetch a raw aircraft.json payload."""
@@ -40,13 +61,14 @@ class Source(Protocol):
     def fetch(self, timeout: float) -> dict:
         """Return the parsed top-level aircraft.json object.
 
-        Raises SourceUnreachable, SourceTimeout, or SourceInvalidData on failure.
+        Raises SourceUnreachable, SourceTimeout, or SourceInvalidData on failure, and nothing
+        else: every failure of a fetch is a SourceError.
         """
         ...
 
 
 def looks_like_bare_host(text: str) -> bool:
-    """True if text is a hostname or IP with no scheme and no path, e.g. "192.168.3.80".
+    """True if text is a hostname or IP with no scheme and no path, e.g. "192.0.2.10".
 
     This is the address a person types when asked where their receiver is, and it is
     neither a URL nor a file path. Anything containing a path separator, a leading dot, or
@@ -74,8 +96,8 @@ def make_source(url_or_path: str, max_bytes: int = DEFAULT_MAX_BYTES) -> Source:
     """Build the right Source for a URL, a bare receiver address, or a filesystem path.
 
     "http://..." and "https://..." return an HttpSource, except for a URL with no path of
-    its own ("http://192.168.3.80"), which is a receiver address wearing a scheme and gets
-    probed like one. A bare host or host:port ("192.168.3.80", "adsb.local:8080") returns
+    its own ("http://192.0.2.10"), which is a receiver address wearing a scheme and gets
+    probed like one. A bare host or host:port ("192.0.2.10", "adsb.local:8080") returns
     a ReceiverSource, which finds the right aircraft.json path on that machine itself.
     Anything else -- "/run/readsb/aircraft.json", a relative path, or a "file://" URL --
     returns a FileSource.

@@ -1,8 +1,8 @@
-"""A Source built from a bare receiver address, e.g. "192.168.3.80".
+"""A Source built from a bare receiver address, e.g. "192.0.2.10".
 
 Typing the receiver's address is the obvious thing to do, and it used to fail in the most
 confusing way available: a string with no scheme fell through to the file loader, so
-`--url 192.168.3.80` reported "file not found: 192.168.3.80". Nothing about that message
+`--url 192.0.2.10` reported "file not found: 192.0.2.10". Nothing about that message
 tells you the tool never even tried the network.
 
 So a bare host now means "find aircraft.json on this machine for me". Receiver images

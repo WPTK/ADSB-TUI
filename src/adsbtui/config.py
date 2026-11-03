@@ -27,6 +27,8 @@ from dataclasses import MISSING, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
+from . import __version__
+
 
 class ConfigError(Exception):
     """Raised for any configuration problem: a malformed file, or a value that fails
@@ -68,7 +70,6 @@ class FilterConfig:
 @dataclass
 class DisplayConfig:
     units: str = "imperial"
-    theme: str = "default"
     color: str = "auto"
     columns: list[str] = field(
         default_factory=lambda: [
@@ -89,13 +90,11 @@ class DisplayConfig:
     )
     owner_width: int = 30
     borders: str = "unicode"
-    density: str = "normal"
     sort_key: str = "distance"
     sort_reverse: bool = False
     stale_after_s: float = 15.0
     linger_s: float = 30.0
     status_bar: bool = True
-    vs_threshold_fpm: float = 256.0
 
 
 @dataclass
@@ -122,8 +121,6 @@ class AlertsConfig:
 @dataclass
 class WatchlistConfig:
     path: str = "~/.config/adsbtui/watchlist.txt"
-    pin_top: bool = True
-    ignore_radius: bool = True
 
 
 @dataclass
@@ -137,6 +134,11 @@ class RegistryConfig:
     #: Download automatically when the database is missing or older than max_age_days.
     #: Off means the Data screen (F8) is the only way to get one.
     auto_update: bool = True
+    #: Where each registry source is downloaded from. The defaults are the real upstreams;
+    #: they are settings so a test (or a mirror) can point at another server. An http(s)
+    #: URL or a local file path.
+    tar1090_url: str = "https://raw.githubusercontent.com/wiedehopf/tar1090-db/csv/aircraft.csv.gz"
+    faa_url: str = "https://registry.faa.gov/database/ReleasableAircraft.zip"
 
 
 @dataclass
@@ -151,7 +153,6 @@ class LoggingConfig:
     level: str = "INFO"
     max_bytes: int = 1_048_576
     backup_count: int = 3
-    redact_home: bool = True
 
 
 @dataclass
@@ -169,7 +170,30 @@ class Config:
     # Populated by load_config(); not part of the TOML/env/CLI schema itself.
     _args: argparse.Namespace | None = field(default=None, repr=False, compare=False)
     _config_path: str | None = field(default=None, repr=False, compare=False)
+    #: The TOML file's own contents as loaded (section -> key -> value), before env and CLI
+    #: were layered on. Saving writes this plus the keys the user edited, so a one-off
+    #: --url or a secret in an env var never becomes permanent.
+    _file_layer: dict[str, dict[str, Any]] = field(default_factory=dict, repr=False, compare=False)
 
+
+#: The config file format version, written as a top-level `schema` key. A file claiming a
+#: newer one is refused rather than half-understood.
+CONFIG_SCHEMA = 1
+
+
+#: Keys that older config files may still set but that no longer do anything. They are
+#: accepted and ignored (expand, migrate, contract) so an upgrade never breaks a working file;
+#: the next Settings save drops them.
+RETIRED_KEYS: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("display", "theme"),
+        ("display", "density"),
+        ("display", "vs_threshold_fpm"),
+        ("watchlist", "pin_top"),
+        ("watchlist", "ignore_radius"),
+        ("logging", "redact_home"),
+    }
+)
 
 #: section name -> dataclass type, driving both the layering logic and type coercion.
 _SECTIONS: dict[str, type] = {
@@ -190,13 +214,23 @@ _SECTIONS: dict[str, type] = {
 # --------------------------------------------------------------------------------------
 
 
+def default_config_path() -> str:
+    """Where a config file is read from and written to when none is named:
+    $XDG_CONFIG_HOME/adsbtui/config.toml, or ~/.config/adsbtui/config.toml. The one place
+    this is decided, so load, first-run setup and Settings save cannot disagree."""
+    xdg_home = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return str(Path(xdg_home) / "adsbtui" / "config.toml")
+
+
 def find_config_path(explicit: str | None = None) -> str | None:
     """Resolve which TOML config file to use, or None if none is found.
 
-    Precedence: `explicit` argument, then the ADSBTUI_CONFIG env var, then ./adsb-tui.toml
-    (if it exists in the current directory), then $XDG_CONFIG_HOME/adsbtui/config.toml
-    (defaulting XDG_CONFIG_HOME to ~/.config if unset), if that exists. A missing file at
-    every candidate is not an error -- it just means defaults/env/CLI apply.
+    Precedence: `explicit` argument, then the ADSBTUI_CONFIG env var, then
+    $XDG_CONFIG_HOME/adsbtui/config.toml (defaulting XDG_CONFIG_HOME to ~/.config if unset),
+    if that exists. The current directory is deliberately not searched: a config can set
+    alerts.command, so picking one up from whatever directory the app was started in would
+    let an untrusted directory run a command. A missing file at every candidate is not an
+    error -- it just means defaults/env/CLI apply.
     """
     if explicit:
         return explicit
@@ -205,16 +239,8 @@ def find_config_path(explicit: str | None = None) -> str | None:
     if env_path:
         return env_path
 
-    cwd_candidate = Path("adsb-tui.toml")
-    if cwd_candidate.is_file():
-        return str(cwd_candidate)
-
-    xdg_home = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
-    xdg_candidate = Path(xdg_home) / "adsbtui" / "config.toml"
-    if xdg_candidate.is_file():
-        return str(xdg_candidate)
-
-    return None
+    default = default_config_path()
+    return default if Path(default).is_file() else None
 
 
 def load_toml(path: str | None) -> dict[str, Any]:
@@ -319,6 +345,13 @@ def build_config(
     section_values: dict[str, dict[str, Any]] = {name: {} for name in _SECTIONS}
 
     for section_name, section_body in toml_dict.items():
+        if section_name == "schema":
+            if not isinstance(section_body, int) or section_body > CONFIG_SCHEMA:
+                raise ConfigError(
+                    f"config file schema {section_body!r} is newer than this adsbtui "
+                    f"understands (schema {CONFIG_SCHEMA}); upgrade adsbtui"
+                )
+            continue
         if section_name not in _SECTIONS:
             raise ConfigError(f"unknown config section {section_name!r} in TOML file")
         if not isinstance(section_body, dict):
@@ -348,6 +381,8 @@ def build_config(
         raw = section_values[section_name]
         kwargs: dict[str, Any] = {}
         for key, value in raw.items():
+            if (section_name, key) in RETIRED_KEYS:
+                continue
             if key not in defaults:
                 raise ConfigError(f"unknown config key {section_name}.{key!r}")
             try:
@@ -361,6 +396,37 @@ def build_config(
     cfg = Config(**sections)
     validate(cfg, allow_null_home=allow_null_home)
     return cfg
+
+
+def changed_keys(old: Config, new: Config) -> set[tuple[str, str]]:
+    """The (section, key) pairs whose value differs between two Configs: what an edit
+    in the Settings screen actually touched."""
+    changed: set[tuple[str, str]] = set()
+    for section_name, section_cls in _SECTIONS.items():
+        before, after = getattr(old, section_name), getattr(new, section_name)
+        for f in fields(section_cls):
+            if getattr(before, f.name) != getattr(after, f.name):
+                changed.add((section_name, f.name))
+    return changed
+
+
+def layer_for_save(
+    file_layer: dict[str, dict[str, Any]], cfg: Config, edited: set[tuple[str, str]]
+) -> dict[str, dict[str, Any]]:
+    """What to write back to the config file: the file's own values plus the edited keys.
+
+    Env and CLI values that were never edited stay out of the file; retired keys are
+    dropped (the next save is when they go).
+    """
+    layer: dict[str, dict[str, Any]] = {}
+    for section_name, body in file_layer.items():
+        if section_name in _SECTIONS and isinstance(body, dict):
+            kept = {k: v for k, v in body.items() if (section_name, k) not in RETIRED_KEYS}
+            if kept:
+                layer[section_name] = kept
+    for section_name, key in edited:
+        layer.setdefault(section_name, {})[key] = getattr(getattr(cfg, section_name), key)
+    return layer
 
 
 # --------------------------------------------------------------------------------------
@@ -439,6 +505,7 @@ def build_argparser() -> argparse.ArgumentParser:
         description="A curses TUI for tracking nearby aircraft from a dump1090/readsb ADS-B feed.",
     )
 
+    parser.add_argument("--version", action="version", version=f"adsbtui {__version__}")
     parser.add_argument("--config", default=None, help="path to a TOML config file")
     parser.add_argument("--url", default=None, help="aircraft.json source: URL or file path")
     parser.add_argument("--lat", type=float, default=None, help="home latitude")
@@ -492,6 +559,12 @@ def build_argparser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--check", action="store_true", default=False, help="validate config and exit"
     )
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        default=False,
+        help="show scripted traffic: no receiver, no network, nothing sent or written",
+    )
 
     return parser
 
@@ -505,7 +578,7 @@ def cli_overrides(args: argparse.Namespace) -> dict[str, Any]:
         if value is not None:
             overrides[dotted_key] = value
 
-    maybe("source.url", args.url)
+    maybe("source.url", "demo" if getattr(args, "demo", False) else args.url)
     maybe("home.lat", args.lat)
     maybe("home.lon", args.lon)
     maybe("filter.radius", args.radius)
@@ -525,7 +598,7 @@ def cli_overrides(args: argparse.Namespace) -> dict[str, Any]:
     return overrides
 
 
-def _env_overrides(env: dict[str, str]) -> dict[str, str]:
+def env_overrides(env: dict[str, str]) -> dict[str, str]:
     """Map an environment mapping (e.g. os.environ) to the flat "section.key" -> value
     dict build_config() expects, reading ADSBTUI_SECTION_KEY style names."""
     overrides: dict[str, str] = {}
@@ -556,10 +629,13 @@ def load_config(argv: list[str] | None = None) -> Config:
     config_path = find_config_path(args.config)
     toml_dict = load_toml(config_path)
 
-    env_dict = _env_overrides(dict(os.environ))
+    env_dict = env_overrides(dict(os.environ))
     cli_dict = cli_overrides(args)
 
-    cfg = build_config(toml_dict, env=env_dict, cli=cli_dict)
+    cfg = build_config(
+        toml_dict, env=env_dict, cli=cli_dict, allow_null_home=bool(getattr(args, "demo", False))
+    )
     cfg._args = args
     cfg._config_path = config_path
+    cfg._file_layer = {k: dict(v) for k, v in toml_dict.items() if isinstance(v, dict)}
     return cfg

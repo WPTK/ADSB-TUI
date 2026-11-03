@@ -14,18 +14,27 @@ from __future__ import annotations
 
 import contextlib
 import curses
+import functools
 import logging
 import os
 import sys
+from collections.abc import Mapping
+from typing import Any
 
 from . import config_write
-from .config import Config, ConfigError, find_config_path, validate
+from .config import (
+    Config,
+    ConfigError,
+    cli_overrides,
+    default_config_path,
+    env_overrides,
+    find_config_path,
+    load_toml,
+    validate,
+)
 from .ui.screens.setup import SetupScreen
 
 log = logging.getLogger("adsbtui")
-
-#: Where a config written by the wizard goes when the user has no config file at all.
-DEFAULT_CONFIG_PATH = "~/.config/adsbtui/config.toml"
 
 #: Flags that mean "this run is scripted": the caller wants output or an exit code, not a
 #: wizard, even on a terminal.
@@ -38,8 +47,14 @@ def should_offer_setup(args, *, stdin=None, stdout=None) -> bool:
     Requires all of: an interactive terminal on both ends (the wizard has to draw and to
     read keys), no scripted mode requested, and no explicit --config, since naming a file
     that then fails to load is a mistake to report rather than a blank slate to fill in.
+    The same goes for a config file that already exists (a typo in it is an error, and the
+    wizard would overwrite it) and for --demo, which is a complete run without any setup.
     """
     if args is None:
+        return False
+    if getattr(args, "demo", False):
+        return False
+    if find_config_path(None) is not None:
         return False
     if getattr(args, "config", None):
         return False
@@ -88,12 +103,14 @@ def _drive(stdscr, screen: SetupScreen) -> bool:
             return bool(getattr(screen, "applied", False))
 
 
-def run_setup(screen: SetupScreen | None = None) -> Config | None:
+def run_setup(
+    screen: SetupScreen | None = None, seed: Mapping[str, Any] | None = None
+) -> Config | None:
     """Run the wizard in curses. Returns the finished Config, or None if it was cancelled.
 
     Only ever called once should_offer_setup() has agreed the run is interactive.
     """
-    screen = SetupScreen() if screen is None else screen
+    screen = SetupScreen(seed=seed) if screen is None else screen
     try:
         finished = curses.wrapper(_drive, screen)
     except curses.error as exc:
@@ -106,7 +123,7 @@ def run_setup(screen: SetupScreen | None = None) -> Config | None:
 
 def save_new_config(cfg: Config, path: str | None = None) -> str | None:
     """Persist a wizard-produced config. Returns the path written, or None on failure."""
-    target = os.path.expanduser(path or find_config_path(None) or DEFAULT_CONFIG_PATH)
+    target = os.path.expanduser(path or find_config_path(None) or default_config_path())
     try:
         config_write.dump_config(cfg, target)
     except OSError as exc:
@@ -130,7 +147,10 @@ def first_run(
 
     # Injectable so tests can drive the whole flow without a terminal; production uses the
     # real curses wizard and the real writer.
-    setup_fn = run_setup if setup_fn is None else setup_fn
+    if setup_fn is None:
+        # What the environment and command line already say pre-fills the wizard (A53).
+        seed = {**env_overrides(dict(os.environ)), **cli_overrides(args)}
+        setup_fn = functools.partial(run_setup, seed=seed)
     save_fn = save_new_config if save_fn is None else save_fn
 
     print("No configuration found. Starting setup -- press Esc at any point to cancel.")
@@ -148,6 +168,8 @@ def first_run(
     if written:
         print(f"Configuration saved to {written}")
         cfg._config_path = written
+        # The wizard wrote the whole config, so the whole config is now the file's layer.
+        cfg._file_layer = load_toml(written)
     else:
         print("Continuing with these settings, but they could not be saved.", file=sys.stderr)
     return cfg, written

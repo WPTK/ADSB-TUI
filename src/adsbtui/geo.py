@@ -66,7 +66,9 @@ def initial_bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> f
     x = math.sin(dlambda) * math.cos(phi2)
     y = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(dlambda)
     theta = math.atan2(x, y)
-    return math.degrees(theta) % 360.0
+    bearing = math.degrees(theta) % 360.0
+    # A tiny negative angle makes `% 360.0` round up to exactly 360.0, which is north again.
+    return 0.0 if bearing >= 360.0 else bearing
 
 
 def elevation_angle_deg(
@@ -113,8 +115,11 @@ def closest_point_of_approach(
     instantaneous snapshots, not exact future promises.
 
     Returns (cpa_distance_mi, cpa_seconds_from_now). Returns (None, None) if track_deg or
-    ground_speed_kt is missing, if the aircraft is effectively stationary (velocity so small the
-    projection is meaningless), or if the closest approach on this heading is already in the past.
+    ground_speed_kt is missing, or if the aircraft is effectively stationary (velocity so small
+    the projection is meaningless). If the closest approach on this heading is already in the
+    past (the aircraft is receding), returns (current_distance_mi, None): the distance is the
+    best remaining bound on how close it came, and the missing time is how callers tell a
+    receding target from an approaching one.
     """
     if track_deg is None or ground_speed_kt is None:
         return (None, None)
@@ -135,7 +140,7 @@ def closest_point_of_approach(
     pv = px * vx + py * vy
     t_cpa = -pv / vv
     if t_cpa < 0:
-        return (None, None)
+        return (math.hypot(px, py), None)
 
     cx = px + vx * t_cpa
     cy = py + vy * t_cpa

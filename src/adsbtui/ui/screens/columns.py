@@ -1,5 +1,5 @@
 """The Columns screen: choose which table columns are shown, their order, and the
-display density / border style.
+border style.
 
 ColumnsScreen follows the Screen design contract documented in ui/screens/__init__.py: a
 read-only title, a pure render_lines(width, height) that returns plain, already-clipped
@@ -7,19 +7,18 @@ strings with no curses calls, and a handle_key(key) that reports navigation inte
 the caller as a short string ("close" here) or None to stay open. curses is imported only
 for its KEY_* integer constants, which is safe without an initialized screen.
 
-Internally this composes three of ui.widgets' pure widgets:
+Internally this composes two of ui.widgets' pure widgets:
 
   * a ui.widgets.ListPicker in multi-select mode, seeded with every column key
     ui.columns.COLUMN_SPECS knows about -- the caller's current_columns first (checked, in
     their existing display order), then any remaining known columns after (unchecked).
     Space toggles a column on/off; move_up()/move_down() (bound here to "+"/"-") reorder
     the item under the cursor, which is how the user changes display order.
-  * two ui.widgets.Select widgets, one for density ("compact"/"normal"/"wide") and one for
-    border style ("unicode"/"ascii"/"none").
+  * a ui.widgets.Select for border style ("unicode"/"ascii"/"none").
 
-Tab (and Shift-Tab) moves focus between the three widgets. Escape closes the screen
+Tab (and Shift-Tab) moves focus between the two widgets. Escape closes the screen
 without applying whatever the widgets currently show -- the caller's original
-current_columns/current_density/current_borders are preserved in result(). Enter or F10
+current_columns/current_borders are preserved in result(). Enter or F10
 commits the widgets' current state into result() and closes the screen.
 """
 
@@ -41,16 +40,10 @@ _MOVE_UP_KEYS = frozenset({ord("+")})
 _MOVE_DOWN_KEYS = frozenset({ord("-")})
 
 _FOCUS_COLUMNS = 0
-_FOCUS_DENSITY = 1
-_FOCUS_BORDERS = 2
-_FOCUS_COUNT = 3
+_FOCUS_BORDERS = 1
+_FOCUS_COUNT = 2
 
-#: (value, label) choices for the two Select widgets.
-_DENSITY_CHOICES: list[tuple[str, str]] = [
-    ("compact", "Compact"),
-    ("normal", "Normal"),
-    ("wide", "Wide"),
-]
+#: (value, label) choices for the border Select widget.
 _BORDER_CHOICES: list[tuple[str, str]] = [
     ("unicode", "Unicode"),
     ("ascii", "ASCII"),
@@ -90,20 +83,19 @@ def _ordered_known_keys(current_columns: Sequence[str]) -> tuple[list[str], int]
 
 class ColumnsScreen:
     """Lets the user choose, reorder, and enable/disable table columns, plus set the
-    display density and border style, then apply or cancel.
+    border style, then apply or cancel.
 
     current_columns is the caller's currently-enabled column keys (a subset/reordering of
-    ui.columns.COLUMN_SPECS' keys) in display order; current_density and current_borders
-    are the caller's current DisplayConfig-style density/borders values. Unknown values are
-    tolerated everywhere (an unknown column key is simply not offered as one of the known
-    columns; an unknown density/borders value falls back to highlighting the first choice)
+    ui.columns.COLUMN_SPECS' keys) in display order; current_borders is the caller's current
+    DisplayConfig-style borders value. Unknown values are tolerated everywhere (an unknown
+    column key is simply not offered as one of the known columns; an unknown borders value
+    falls back to highlighting the first choice)
     and never raise.
     """
 
     def __init__(
         self,
         current_columns: Sequence[str],
-        current_density: str,
         current_borders: str,
     ) -> None:
         items, enabled_count = _ordered_known_keys(current_columns)
@@ -122,9 +114,6 @@ class ColumnsScreen:
             self._picker.handle_key(curses.KEY_DOWN)
         self._picker.handle_key(curses.KEY_HOME)
 
-        self._density_select = Select(
-            _DENSITY_CHOICES, initial_index=_index_of(_DENSITY_CHOICES, current_density)
-        )
         self._borders_select = Select(
             _BORDER_CHOICES, initial_index=_index_of(_BORDER_CHOICES, current_borders)
         )
@@ -133,7 +122,6 @@ class ColumnsScreen:
         # The committed result, only updated when Enter/F10 applies the widgets' current
         # state -- Escape leaves these exactly as the caller passed them in.
         self._result_columns: list[str] = list(current_columns)
-        self._result_density: str = current_density
         self._result_borders: str = current_borders
 
     @property
@@ -142,19 +130,16 @@ class ColumnsScreen:
 
     @property
     def focus(self) -> int:
-        """0 for the column picker, 1 for density, 2 for borders."""
+        """0 for the column picker, 1 for borders."""
         return self._focus
 
     def _focused_widget(self) -> ListPicker | Select:
         if self._focus == _FOCUS_COLUMNS:
             return self._picker
-        if self._focus == _FOCUS_DENSITY:
-            return self._density_select
         return self._borders_select
 
     def _apply(self) -> None:
         self._result_columns = self._picker.selected_items
-        self._result_density = self._density_select.value
         self._result_borders = self._borders_select.value
 
     def handle_key(self, key: int) -> str | None:
@@ -181,12 +166,11 @@ class ColumnsScreen:
         return None
 
     def result(self) -> dict[str, Any]:
-        """The committed {"columns", "density", "borders"} dict: the caller's originals
+        """The committed {"columns", "borders"} dict: the caller's originals
         unless Enter/F10 applied the widgets' current state before the screen closed.
         """
         return {
             "columns": list(self._result_columns),
-            "density": self._result_density,
             "borders": self._result_borders,
         }
 
@@ -204,12 +188,6 @@ class ColumnsScreen:
             lines.append(_clip(indent + line, width))
 
         lines.append("")
-
-        density_mark = ">" if self._focus == _FOCUS_DENSITY else " "
-        density_prefix = f"{density_mark} Density: "
-        density_lines = self._density_select.render_lines(max(0, width - len(density_prefix)))
-        density_text = density_lines[0] if density_lines else ""
-        lines.append(_clip(density_prefix + density_text, width))
 
         borders_mark = ">" if self._focus == _FOCUS_BORDERS else " "
         borders_prefix = f"{borders_mark} Borders: "
