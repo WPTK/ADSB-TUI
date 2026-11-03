@@ -3,8 +3,7 @@
 
 Precedence: CLI flag > `ADSBTUI_<SECTION>_<KEY>` env var > `config.toml` > default. Every key
 below is also in the Settings screen (`F2`) with the same default and a one-line help text.
-Keys marked **†** are stored, validated, and editable, but don't affect behavior yet. See
-[Known gaps](../README.md#known-gaps).
+Keys marked **†** are stored, validated, and editable, but don't affect behavior yet.
 
 **Which file is read.** The first that exists of: `--config PATH`, `$ADSBTUI_CONFIG`,
 `$XDG_CONFIG_HOME/adsbtui/config.toml` (`XDG_CONFIG_HOME` defaults to `~/.config`). The current

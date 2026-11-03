@@ -1,18 +1,18 @@
 # ADSB-TUI
 
-A terminal UI for watching aircraft near you, fed by your own `readsb` or `dump1090-fa` receiver.
-Python 3.11+, no runtime dependencies (on Windows, `pip install ".[windows]"` adds
-`windows-curses`, because Python there has no `curses`).
+A terminal UI that lists aircraft near you from the `aircraft.json` feed of your own `readsb` or `dump1090-fa` receiver. It renders a sortable table and a radar scope with curses.
+
+## Prerequisites
+
+- Python 3.11+
+- A `readsb` or `dump1090-fa` receiver whose `aircraft.json` you can reach by URL or file path (or use `--demo`, below)
+- Windows only: `windows-curses`, installed by the `windows` extra
 
 ![adsbtui showing live traffic around SFO: the aircraft table with altitude-coloured rows and the radar scope](docs/screenshots/main.png)
 
-- Radar scope and a sortable table with distance, bearing and closest approach from your location
-- Registration, type and owner filled in from a registry that downloads and refreshes itself
-- Alerts for overhead, inbound and emergency traffic: bell, desktop, webhook or shell command
-- Filters, search, a watchlist and sighting history
-- Script-friendly modes (`--once`, `--headless`, `--batch`) that need no terminal
+## Quickstart
 
-## Install
+1. Install:
 
 ```bash
 git clone https://github.com/WPTK/ADSB-TUI.git
@@ -30,7 +30,7 @@ pipx install --editable .
 To update, `git pull` and restart adsbtui. A pipx install made without `--editable` won't pick
 up the pull; fix it once with `pipx install --force --editable .`.
 
-## Quick start
+2. Start the app:
 
 ```bash
 adsbtui
@@ -70,38 +70,15 @@ nothing to disk. The status line says DEMO.
 
 ![The detail pane for one aircraft, with closest approach and squawk](docs/screenshots/detail.png)
 
-## Without the UI
-
-```bash
-adsbtui --once --format json    # one snapshot (also table, csv)
-adsbtui --headless              # run as a service: alerts and history, no screen
-adsbtui --batch                 # stream SEEN/NEW/LOST/ALERT lines
-adsbtui --check                 # validate config and fetch once
-```
-
 ## Configuration
 
-Settings (`F2`) covers every option. The config file is `$ADSBTUI_CONFIG`, else
+Press `F2` in the app to edit every option. The config file is `$ADSBTUI_CONFIG`, else
 `$XDG_CONFIG_HOME/adsbtui/config.toml` (`~/.config/adsbtui/config.toml` by default); the current
 directory is never searched. Flags override `ADSBTUI_<SECTION>_<KEY>` environment
 variables, which override `config.toml`. The full key list, column meanings and the watchlist
 format are in [docs/configuration.md](docs/configuration.md).
 
-## Known gaps
-
-`source.stale_s` is saved but not applied yet. Config files that still set the retired keys
-`display.theme`, `display.density`, `display.vs_threshold_fpm`, `watchlist.pin_top`,
-`watchlist.ignore_radius` or `logging.redact_home` keep loading; the keys are ignored.
-
-## Development
-
-```bash
-pip install -e ".[dev]"
-pytest -q && ruff check src tests
-```
-
 ## License
 
 [CC0 1.0](LICENSE): public domain, no warranty. Downloaded registry data has its own terms,
 shown in the app: the FAA extract is public domain, tar1090-db is non-commercial use only.
-Screenshot traffic is a live snapshot from [adsb.lol](https://adsb.lol) (ODbL).
