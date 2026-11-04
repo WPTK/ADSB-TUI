@@ -29,6 +29,7 @@ import contextlib
 import curses
 import textwrap
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from adsbtui.ui.theme import glyphs
@@ -58,6 +59,8 @@ def wrap_text(text: str, width: int, indent: str = "") -> list[str]:
     hints, where cutting a line mid-word hides the part the reader came for."""
     if width <= 0:
         return []
+    if len(indent) >= width:  # no room for text after the indent: wrap flush left instead
+        indent = ""
     return textwrap.wrap(
         text, width, initial_indent=indent, subsequent_indent=indent, break_long_words=True
     ) or [""]
@@ -634,8 +637,9 @@ class Form:
 
     def render_lines(self, width: int) -> list[str]:
         lines: list[str] = []
+        label_w = max(len(label) for label, _ in self.fields)
         for i, (label, widget) in enumerate(self.fields):
-            prefix = f"{'>' if i == self._focus else ' '} {label}: "
+            prefix = f"{'>' if i == self._focus else ' '} {label.ljust(label_w)}  "
             widget_lines = widget.render_lines(max(0, width - len(prefix)))
             if not widget_lines:
                 widget_lines = [""]
@@ -701,3 +705,267 @@ def draw_box(
     if h > 1:
         bottom = chars["bl"] + h_ch * max(0, w - 2) + chars["br"]
         _safe_addstr(win, y + h - 1, x, bottom[:w])
+
+
+# ---------------------------------------------------------------------------------------
+# The shared dialog key model. Every overlay screen speaks it, so the keys mean the same
+# thing everywhere and the Help screen can document them once.
+# ---------------------------------------------------------------------------------------
+
+KEY_ESC = 27
+KEY_TAB = ord("\t")
+
+#: s / F10 apply for this session; F2 / S apply and save to disk (Ctrl-S, byte 19, is an
+#: extra alias only: a terminal in XOFF flow control swallows it before curses sees it).
+APPLY_KEYS = frozenset({ord("s"), curses.KEY_F10})
+SAVE_KEYS = frozenset({curses.KEY_F2, ord("S"), 19})
+CANCEL_KEYS = frozenset({KEY_ESC, ord("q")})
+ENTER_KEYS = _ENTER_KEYS
+
+
+def classify_key(key: int) -> str | None:
+    """Name the dialog-level meaning of a key that is not being typed into a text field:
+    "apply", "save", "cancel", "next", "prev", or None for anything a control handles."""
+    if key in APPLY_KEYS:
+        return "apply"
+    if key in SAVE_KEYS:
+        return "save"
+    if key in CANCEL_KEYS:
+        return "cancel"
+    if key == KEY_TAB:
+        return "next"
+    if key == curses.KEY_BTAB:
+        return "prev"
+    return None
+
+
+class DiscardPrompt:
+    """The inline "Discard changes? y/n" question shown when a dirty dialog is cancelled."""
+
+    TEXT = "Discard changes? y/n"
+
+    def __init__(self) -> None:
+        self.active = False
+
+    def handle_key(self, key: int) -> str | None:
+        """"discard" on y, "keep" on n or Esc; any other key is ignored."""
+        if key in (ord("y"), ord("Y")):
+            self.active = False
+            return "discard"
+        if key in (ord("n"), ord("N"), KEY_ESC):
+            self.active = False
+            return "keep"
+        return None
+
+
+class Button:
+    """A push button. Enter or Space presses it; the owner reads and clears `pressed`."""
+
+    def __init__(self, label: str) -> None:
+        self.label = label
+        self.pressed = False
+
+    def handle_key(self, key: int) -> bool:
+        if key in _ENTER_KEYS or key == ord(" "):
+            self.pressed = True
+            return True
+        return False
+
+    def render_lines(self, width: int) -> list[str]:
+        return [_clip(f"[ {self.label} ]", width)]
+
+
+@dataclass
+class FieldRow:
+    """One row of a FieldList: a label, the control that edits it, and its help text.
+
+    A `section` names a divider drawn above the row whenever it differs from the row before.
+    """
+
+    label: str
+    widget: Any
+    help: str = ""
+    section: str = ""
+
+
+def _fit(text: str, width: int, cursor: int | None = None) -> str:
+    """Fit text in width; with a cursor, scroll so the cursor stays visible."""
+    if width <= 0:
+        return ""
+    if len(text) <= width:
+        return text
+    if cursor is None:
+        return text[: width - 1] + "~"
+    start = max(0, min(cursor - width + 1, len(text) - width))
+    return text[start : start + width]
+
+
+def _widget_state(widget: Any) -> Any:
+    text = getattr(widget, "text", None)
+    return text if text is not None else getattr(widget, "value", None)
+
+
+class FieldList:
+    """A vertical list of labelled controls with one focused row and an aligned layout.
+
+    Up/Down/j/k move; PgUp/PgDn/Home/End jump; Left/Right/Space change a Select or Toggle;
+    Enter acts on the focused control only: it flips a Toggle, cycles a Select, presses a
+    Button, and starts editing a text field. While a text field is being edited every
+    printable key goes to it, Enter or Tab commits the edit and Esc puts the old text back.
+    handle_key() returns True when the key was used.
+    """
+
+    def __init__(self, rows: Sequence[FieldRow]) -> None:
+        self.rows = list(rows)
+        self.focus = 0
+        self.editing = False
+        self._backup = ""
+        self.page = 8
+        self._initial = self.state()
+
+    def state(self) -> tuple[Any, ...]:
+        return tuple(_widget_state(row.widget) for row in self.rows)
+
+    @property
+    def dirty(self) -> bool:
+        return self.state() != self._initial
+
+    @property
+    def focused(self) -> FieldRow:
+        return self.rows[self.focus]
+
+    def _move(self, delta: int) -> None:
+        self.focus = max(0, min(self.focus + delta, len(self.rows) - 1))
+
+    def start_edit(self) -> bool:
+        widget = self.focused.widget
+        if not isinstance(widget, TextField):
+            return False
+        self._backup = widget.text if isinstance(widget, NumberField) else widget.value
+        self.editing = True
+        return True
+
+    def stop_edit(self, keep: bool = True) -> None:
+        if not keep:
+            self.focused.widget.value = self._backup
+        self.editing = False
+
+    def handle_key(self, key: int) -> bool:
+        if not self.rows:
+            return False
+        widget = self.focused.widget
+        if self.editing:
+            if key == KEY_ESC:
+                self.stop_edit(keep=False)
+            elif key in _ENTER_KEYS or key == KEY_TAB:
+                self.stop_edit()
+            else:
+                widget.handle_key(key)
+            return True
+        if key in (curses.KEY_UP, ord("k")):
+            self._move(-1)
+        elif key in (curses.KEY_DOWN, ord("j")):
+            self._move(1)
+        elif key == curses.KEY_PPAGE:
+            self._move(-self.page)
+        elif key == curses.KEY_NPAGE:
+            self._move(self.page)
+        elif key == curses.KEY_HOME:
+            self.focus = 0
+        elif key == curses.KEY_END:
+            self.focus = len(self.rows) - 1
+        elif key in _ENTER_KEYS:
+            if isinstance(widget, Select):
+                widget.handle_key(curses.KEY_RIGHT)
+            elif isinstance(widget, TextField):
+                self.start_edit()
+            else:
+                widget.handle_key(key)
+        elif isinstance(widget, TextField):
+            return False
+        else:
+            return widget.handle_key(key)
+        return True
+
+    def _value_text(self, row: FieldRow, focused: bool, width: int) -> str:
+        widget = row.widget
+        if isinstance(widget, TextField):
+            raw = widget.text if isinstance(widget, NumberField) else widget.value
+            if focused and self.editing:
+                cursor = widget.cursor
+                return "[" + _fit(raw[:cursor] + "_" + raw[cursor:], width - 2, cursor) + "]"
+            return _fit(raw, width) if raw else "(empty)"
+        return widget.render_lines(width)[0]
+
+    def render(self, width: int, capacity: int) -> tuple[list[str], int, str]:
+        """Return (body lines, index of the focused line, scroll note) for a window of
+        `capacity` lines. The note is "" when everything fits, else e.g. "5/12  more below"."""
+        label_w = min(max((len(r.label) for r in self.rows), default=0), max(8, width // 2))
+        value_w = max(1, width - 2 - label_w - 2)
+        lines: list[str] = []
+        focus_line = 0
+        section = None
+        for i, row in enumerate(self.rows):
+            if row.section and row.section != section:
+                section = row.section
+                head = f"-- {section} "
+                lines.append(head + "-" * max(0, width - len(head)))
+            if i == self.focus:
+                focus_line = len(lines)
+            mark = ">" if i == self.focus else " "
+            label = _clip(row.label, label_w).ljust(label_w)
+            value = self._value_text(row, i == self.focus, value_w)
+            lines.append(_clip(f"{mark} {label}  {value}", width))
+        capacity = max(1, capacity)
+        if len(lines) <= capacity:
+            return lines, focus_line, ""
+        # One line is spent on the scroll note, so the window is a line shorter.
+        window_h = max(1, capacity - 1)
+        start = max(0, min(focus_line - window_h // 2, len(lines) - window_h))
+        above = start > 0
+        below = start + window_h < len(lines)
+        note = f"{self.focus + 1}/{len(self.rows)}"
+        if above and below:
+            note += "  more above and below"
+        elif above:
+            note += "  more above"
+        else:
+            note += "  more below"
+        return lines[start : start + window_h], focus_line - start, note
+
+
+def compose_dialog(
+    width: int,
+    height: int,
+    *,
+    head: Sequence[str],
+    body: Callable[[int], tuple[list[str], int, str]],
+    help_text: str = "",
+    status: str = "",
+    footer: str = "",
+    min_height: int = 0,
+) -> tuple[list[str], int | None]:
+    """Stack head, a scrolling body, a rule, the focused field's help, status and footer.
+
+    `body(capacity)` returns (lines, focus line within them, scroll note). Returns the lines
+    (padded to min_height, so the box does not jump when the content changes) and the index
+    of the focused line, for the overlay to highlight.
+    """
+    tail: list[str] = ["-" * width]
+    tail += wrap_text(help_text, width)[:2] if help_text else [""]
+    if status:
+        tail += wrap_text(status, width)[:2]
+    if footer:
+        tail += wrap_text(footer, width)
+    head = [_clip(line, width) for line in head]
+    capacity = height - len(head) - len(tail)
+    if capacity < 1:
+        return (list(head) + tail)[:height], None
+    lines, focus_line, note = body(capacity)
+    out = list(head) + lines
+    if note:
+        out.append(_clip(note.rjust(width), width))
+    pad = min(height, min_height) - len(out) - len(tail)
+    out += [""] * max(0, pad)
+    out += tail
+    return out[:height], len(head) + focus_line

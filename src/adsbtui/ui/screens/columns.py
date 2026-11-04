@@ -16,10 +16,13 @@ Internally this composes two of ui.widgets' pure widgets:
     the item under the cursor, which is how the user changes display order.
   * a ui.widgets.Select for border style ("unicode"/"ascii"/"none").
 
-Tab (and Shift-Tab) moves focus between the two widgets. Escape closes the screen
-without applying whatever the widgets currently show -- the caller's original
-current_columns/current_borders are preserved in result(). Enter or F10
-commits the widgets' current state into result() and closes the screen.
+The screen is one list: the columns, then the Borders row. Up/Down move through it (Down
+from the last column lands on Borders), Space or Enter shows/hides the column under the
+cursor, "+"/"-" move it earlier/later in the table, and Tab / Shift-Tab jump between the
+column list and Borders. Left/Right/Space/Enter change the border style. Enter never closes
+the screen: s or F10 (also F2/S) applies and closes, Esc or q cancels -- with a "Discard
+changes? y/n" question first when something was changed. result() is the caller's original
+current_columns/current_borders unless an apply came first.
 """
 
 from __future__ import annotations
@@ -29,19 +32,22 @@ from collections.abc import Sequence
 from typing import Any
 
 from adsbtui.ui.columns import COLUMN_SPECS
-from adsbtui.ui.widgets import ListPicker, Select
+from adsbtui.ui.widgets import (
+    ENTER_KEYS,
+    DiscardPrompt,
+    ListPicker,
+    Select,
+    classify_key,
+    compose_dialog,
+)
 
-_ESCAPE_KEY = 27
-_ENTER_KEYS = frozenset({10, 13, curses.KEY_ENTER})
-_APPLY_KEYS = _ENTER_KEYS | {curses.KEY_F10}
-_TAB_FORWARD_KEYS = frozenset({ord("\t")})
-_TAB_BACKWARD_KEYS = frozenset({curses.KEY_BTAB})
-_MOVE_UP_KEYS = frozenset({ord("+")})
-_MOVE_DOWN_KEYS = frozenset({ord("-")})
+_FOOTER_COLUMNS = "Up/Down move  Space show  +/- reorder  Tab borders  s apply  Esc cancel"
+_FOOTER_BORDERS = "Left/Right style  Up back to columns  Tab columns  s apply  Esc cancel"
+_MOVE_UP_KEYS = frozenset({ord("+"), ord("=")})
+_MOVE_DOWN_KEYS = frozenset({ord("-"), ord("_")})
 
 _FOCUS_COLUMNS = 0
 _FOCUS_BORDERS = 1
-_FOCUS_COUNT = 2
 
 #: (value, label) choices for the border Select widget.
 _BORDER_CHOICES: list[tuple[str, str]] = [
@@ -118,51 +124,76 @@ class ColumnsScreen:
             _BORDER_CHOICES, initial_index=_index_of(_BORDER_CHOICES, current_borders)
         )
         self._focus = _FOCUS_COLUMNS
+        self._prompt = DiscardPrompt()
+        self.applied = False
+        self.highlight_row: int | None = None
+        self._initial = self._state()
 
-        # The committed result, only updated when Enter/F10 applies the widgets' current
-        # state -- Escape leaves these exactly as the caller passed them in.
+        # The committed result, only updated by an apply -- cancelling leaves these
+        # exactly as the caller passed them in.
         self._result_columns: list[str] = list(current_columns)
         self._result_borders: str = current_borders
 
+    def _state(self) -> tuple[Any, ...]:
+        return (
+            tuple(self._picker.selected_items),
+            tuple(self._picker.items),
+            self._borders_select.value,
+        )
+
+    @property
+    def dirty(self) -> bool:
+        return self._state() != self._initial
+
     @property
     def title(self) -> str:
-        return "Columns"
+        return "Columns *" if self.dirty else "Columns"
 
     @property
     def focus(self) -> int:
-        """0 for the column picker, 1 for borders."""
+        """0 for the column list, 1 for borders."""
         return self._focus
-
-    def _focused_widget(self) -> ListPicker | Select:
-        if self._focus == _FOCUS_COLUMNS:
-            return self._picker
-        return self._borders_select
 
     def _apply(self) -> None:
         self._result_columns = self._picker.selected_items
         self._result_borders = self._borders_select.value
+        self.applied = True
 
     def handle_key(self, key: int) -> str | None:
-        if key == _ESCAPE_KEY:
+        if self._prompt.active:
+            return "close" if self._prompt.handle_key(key) == "discard" else None
+        action = classify_key(key)
+        if action == "cancel":
+            if self.dirty:
+                self._prompt.active = True
+                return None
             return "close"
-        if key in _TAB_FORWARD_KEYS:
-            self._focus = (self._focus + 1) % _FOCUS_COUNT
-            return None
-        if key in _TAB_BACKWARD_KEYS:
-            self._focus = (self._focus - 1) % _FOCUS_COUNT
-            return None
-        if self._focus == _FOCUS_COLUMNS:
-            if key in _MOVE_UP_KEYS:
-                self._picker.move_up()
-                return None
-            if key in _MOVE_DOWN_KEYS:
-                self._picker.move_down()
-                return None
-        if self._focused_widget().handle_key(key):
-            return None
-        if key in _APPLY_KEYS:
+        if action in ("apply", "save"):
             self._apply()
             return "close"
+        if action in ("next", "prev"):
+            self._focus = _FOCUS_BORDERS if self._focus == _FOCUS_COLUMNS else _FOCUS_COLUMNS
+            return None
+        if self._focus == _FOCUS_BORDERS:
+            if key in (curses.KEY_UP, ord("k")):
+                self._focus = _FOCUS_COLUMNS
+            elif key in ENTER_KEYS:
+                self._borders_select.handle_key(curses.KEY_RIGHT)
+            else:
+                self._borders_select.handle_key(key)
+            return None
+        if key in _MOVE_UP_KEYS:
+            self._picker.move_up()
+        elif key in _MOVE_DOWN_KEYS:
+            self._picker.move_down()
+        elif key in (curses.KEY_DOWN, ord("j")) and self._picker.cursor == len(
+            self._picker.items
+        ) - 1:
+            self._focus = _FOCUS_BORDERS
+        elif key in ENTER_KEYS:
+            self._picker.handle_key(ord(" "))
+        else:
+            self._picker.handle_key(key)
         return None
 
     def result(self) -> dict[str, Any]:
@@ -177,25 +208,41 @@ class ColumnsScreen:
     def render_lines(self, width: int, height: int) -> list[str]:
         if width <= 0 or height <= 0:
             return []
+        picker = self._picker
+        n = len(picker.items)
+        on_columns = self._focus == _FOCUS_COLUMNS
+        rows = []
+        for i, key in enumerate(picker.items):
+            mark = ">" if on_columns and i == picker.cursor else " "
+            box = "[x]" if picker.is_selected(i) else "[ ]"
+            rows.append(f"{mark} {box} {COLUMN_SPECS[key].header}")
+        border = self._borders_select.render_lines(width)[0]
+        pinned = ["-" * width, f"{' ' if on_columns else '>'} {'Borders':<10} {border}"]
+        focus_line = picker.cursor if on_columns else n + 1
 
-        lines: list[str] = []
+        def body(capacity: int) -> tuple[list[str], int, str]:
+            if n + 2 <= capacity:
+                return rows + pinned, focus_line, ""
+            room = max(1, capacity - 3)
+            top = max(0, min(picker.cursor - room // 2, n - room))
+            if not on_columns:
+                top = n - room
+            fl = picker.cursor - top if on_columns else room + 1
+            return rows[top : top + room] + pinned, fl, f"{picker.cursor + 1}/{n}"
 
-        columns_mark = ">" if self._focus == _FOCUS_COLUMNS else " "
-        lines.append(_clip(f"{columns_mark} Columns (Space: toggle  +/-: reorder):", width))
-        indent = "  "
-        picker_width = max(0, width - len(indent))
-        for line in self._picker.render_lines(picker_width):
-            lines.append(_clip(indent + line, width))
-
-        lines.append("")
-
-        borders_mark = ">" if self._focus == _FOCUS_BORDERS else " "
-        borders_prefix = f"{borders_mark} Borders: "
-        borders_lines = self._borders_select.render_lines(max(0, width - len(borders_prefix)))
-        borders_text = borders_lines[0] if borders_lines else ""
-        lines.append(_clip(borders_prefix + borders_text, width))
-
-        lines.append("")
-        lines.append(_clip("Tab: switch focus  Enter/F10: apply  Esc: cancel", width))
-
-        return lines[:height]
+        help_text = (
+            "Show or hide columns and set their order: + moves one earlier, - later."
+            if on_columns
+            else "Box-drawing style for the header divider and column separators."
+        )
+        lines, self.highlight_row = compose_dialog(
+            width,
+            height,
+            head=[],
+            body=body,
+            help_text=help_text,
+            status=DiscardPrompt.TEXT if self._prompt.active else "",
+            footer=_FOOTER_COLUMNS if on_columns else _FOOTER_BORDERS,
+            min_height=n + 7,
+        )
+        return lines

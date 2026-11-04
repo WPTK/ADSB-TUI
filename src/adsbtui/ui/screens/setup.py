@@ -16,8 +16,10 @@ and no receiver anywhere nearby.
 
 Keys: Enter/F10 confirms the current step and moves on, Shift-Tab steps back, Tab moves
 focus within a step, F5 (or Ctrl-P) runs the step's lookup action -- probing candidates on
-the receiver step, reading receiver.json on the home step -- and Esc abandons the wizard.
-On the final summary step Enter sets .applied and returns "close"; the caller then reads
+the receiver step, reading receiver.json on the home step -- and Esc abandons the wizard
+(after a "Discard? y/n" question once anything has been entered). Unlike the settings
+dialogs a wizard step has one obvious field, so text is typed straight in without an
+edit mode, and Enter advances the step rather than acting on a field. On the final summary step Enter sets .applied and returns "close"; the caller then reads
 result() and writes it out with config_write.dump_config().
 """
 
@@ -34,7 +36,15 @@ from typing import Any
 from adsbtui.config import Config
 from adsbtui.config_write import dump_config_str
 from adsbtui.sources import SourceError, make_source
-from adsbtui.ui.widgets import Form, ListPicker, NumberField, Select, TextField
+from adsbtui.ui.widgets import (
+    DiscardPrompt,
+    Form,
+    ListPicker,
+    NumberField,
+    Select,
+    TextField,
+    wrap_text,
+)
 
 _CANCEL_KEYS = frozenset({27})
 _ADVANCE_KEYS = frozenset({10, 13, curses.KEY_ENTER, curses.KEY_F10})
@@ -242,6 +252,8 @@ class SetupScreen:
         self.error: str | None = None
         self.message: str | None = None
 
+        self._prompt = DiscardPrompt()
+        self._initial_host = initial_host
         self._host_field = TextField(initial=initial_host)
         self._probe_results: list[ProbeResult] = []
         self._picker: ListPicker | None = None
@@ -289,8 +301,22 @@ class SetupScreen:
         """The last probe's results, in the order they were tried (empty before a probe)."""
         return list(self._probe_results)
 
+    @property
+    def dirty(self) -> bool:
+        """True once the user has gone past step one or typed something of their own."""
+        return (
+            self._step > STEP_RECEIVER
+            or self._host_field.value != self._initial_host
+            or self._picker is not None
+        )
+
     def handle_key(self, key: int) -> str | None:
+        if self._prompt.active:
+            return "close" if self._prompt.handle_key(key) == "discard" else None
         if key in _CANCEL_KEYS:
+            if self.dirty:
+                self._prompt.active = True
+                return None
             return "close"
         if key in _BACK_KEYS:
             self._go_back()
@@ -547,11 +573,13 @@ class SetupScreen:
 
         head = [_clip(self.title, width), ""]
         tail = [""]
-        if self.error:
+        if self._prompt.active:
+            tail.append(_clip(DiscardPrompt.TEXT, width))
+        elif self.error:
             tail.append(_clip(f"! {self.error}", width))
         elif self.message:
             tail.append(_clip(f"- {self.message}", width))
-        tail.append(_clip(self._footer(), width))
+        tail.extend(wrap_text(self._footer(), width))
 
         capacity = height - len(head) - len(tail)
         if capacity < 1:
@@ -570,9 +598,9 @@ class SetupScreen:
 
     def _footer(self) -> str:
         if self._step == STEP_RECEIVER:
-            return "F5 probe   Tab focus   Enter next   Esc cancel"
+            return "Type host  F5 probe  Tab results  Enter next step  Esc cancel"
         if self._step == STEP_HOME:
-            return "F5 read receiver.json   Tab/Up/Down field   Enter next   Shift-Tab back"
+            return "Up/Down field  F5 read receiver.json  Enter next step  Shift-Tab back  Esc cancel"
         if self._step == STEP_UNITS:
-            return "Tab/Up/Down field   Left/Right units   Enter next   Shift-Tab back"
-        return "Enter finish   Shift-Tab back   Esc cancel"
+            return "Up/Down field  Left/Right units  Enter next step  Shift-Tab back  Esc cancel"
+        return "Enter finish and write  Shift-Tab back  Esc cancel"

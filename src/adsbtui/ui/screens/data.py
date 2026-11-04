@@ -28,12 +28,14 @@ is what lets the tests drive the whole thing -- progress, refusal, completion, f
 with no network and no terminal. curses is imported only for its KEY_* integer constants,
 which is safe without an initialized screen.
 
-Keys: Up/Down select a source, 'u' updates the selected one, 'U' updates every
-downloadable one in turn, Esc closes.
+Keys: Up/Down select a source, Enter or 'u' updates the selected one, 'U' updates every
+downloadable one in turn, Esc or q closes. There is nothing to apply or discard here, so
+the screen never asks for confirmation; an update in flight keeps running after it closes.
 """
 
 from __future__ import annotations
 
+import curses
 import logging
 import os
 import textwrap
@@ -54,11 +56,11 @@ from adsbtui.enrich.registry_update import (
     build_from_tar1090,
     read_meta,
 )
-from adsbtui.ui.widgets import ListPicker, ProgressBar
+from adsbtui.ui.widgets import ENTER_KEYS, ListPicker, ProgressBar
 
 log = logging.getLogger("adsbtui")
 
-_ESCAPE_KEY = 27
+_CLOSE_KEYS = frozenset({27, ord("q"), ord("Q"), curses.KEY_F10})
 _UPDATE_KEY = ord("u")
 _UPDATE_ALL_KEY = ord("U")
 
@@ -434,9 +436,9 @@ class DataScreen:
     # ----------------------------------------------------------------------------------
 
     def handle_key(self, key: int) -> str | None:
-        if key == _ESCAPE_KEY:
+        if key in _CLOSE_KEYS:
             return "close"
-        if key == _UPDATE_KEY:
+        if key == _UPDATE_KEY or key in ENTER_KEYS:
             self.update_selected()
             return None
         if key == _UPDATE_ALL_KEY:
@@ -480,5 +482,5 @@ class DataScreen:
                 lines.append(_clip(notice, width))
 
         lines.append("")
-        lines.append(_clip("Up/Down: select  u: update  U: update all  Esc: close", width))
+        lines.append(_clip("Up/Down select  Enter/u update  U update all  Esc/q close", width))
         return lines[:height]
