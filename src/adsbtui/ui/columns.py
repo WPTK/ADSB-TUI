@@ -86,7 +86,7 @@ COLUMN_SPECS: dict[str, ColumnSpec] = {
         "gs", "SPEED", min_width=8, max_width=9, priority=3, align="right", short="SPD"
     ),
     "dist": ColumnSpec(
-        "dist", "DISTANCE", min_width=9, max_width=10, priority=1, align="right", short="DIST"
+        "dist", "DISTANCE", min_width=10, max_width=10, priority=1, align="right", short="DIST"
     ),
     "alert": ColumnSpec(
         "alert", "ALERT", min_width=5, max_width=8, priority=4, align="left", short="ALRT"
