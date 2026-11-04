@@ -1,8 +1,9 @@
 """The aircraft detail screen: a read-only, scrollable "spec sheet" for one aircraft.
 
 DetailScreen follows the Screen design contract documented in ui/screens/__init__.py: a
-read-only title, a pure render_lines(width, height), and a handle_key() that only ever
-closes itself (this screen has no internal navigation -- every field is plain text). Like
+read-only title, a pure render_lines(width, height), and a handle_key() that scrolls the
+sheet (Up/Down/j/k/PgUp/PgDn/Home/End) and closes on Esc or q. There is nothing to apply, so
+Enter and the other keys do nothing rather than throwing the sheet away. Like
 ui/columns.py, this module is pure: no curses calls, no network calls, no global state, so
 it is fully unit-testable without a terminal. curses is imported only for its KEY_ENTER
 integer constant, which is safe without an initialized screen.
@@ -15,6 +16,7 @@ import curses
 from adsbtui.alerts import decode_category, decode_db_flags
 from adsbtui.geo import compass_point
 from adsbtui.model import Aircraft
+from adsbtui.ui.widgets import wrap_text
 from adsbtui.units import (
     UNIT_SYSTEMS,
     format_altitude,
@@ -23,9 +25,9 @@ from adsbtui.units import (
     format_vspeed,
 )
 
-#: Keys that close the screen: Escape, the letter q, and Enter (in any of the forms
-#: TextField/MessageBox elsewhere in ui/widgets.py already treat as "Enter").
-_CLOSE_KEYS = frozenset({27, ord("q"), ord("Q"), 10, 13, curses.KEY_ENTER})
+#: Keys that close the screen.
+_CLOSE_KEYS = frozenset({27, ord("q"), ord("Q")})
+_FOOTER = "Up/Down scroll  Esc/q close"
 
 
 def _clip(text: str, width: int) -> str:
@@ -144,6 +146,8 @@ class DetailScreen:
             raise ValueError(f"unknown unit system {unit_system!r}")
         self._aircraft = aircraft
         self._unit_system = unit_system
+        self._offset = 0
+        self._page = 8
 
     @property
     def title(self) -> str:
@@ -158,6 +162,18 @@ class DetailScreen:
     def handle_key(self, key: int) -> str | None:
         if key in _CLOSE_KEYS:
             return "close"
+        step = {
+            curses.KEY_UP: -1,
+            ord("k"): -1,
+            curses.KEY_DOWN: 1,
+            ord("j"): 1,
+            curses.KEY_PPAGE: -self._page,
+            curses.KEY_NPAGE: self._page,
+            curses.KEY_HOME: -(10**6),
+            curses.KEY_END: 10**6,
+        }.get(key)
+        if step is not None:
+            self._offset = max(0, self._offset + step)
         return None
 
     def render_lines(self, width: int, height: int) -> list[str]:
@@ -165,5 +181,19 @@ class DetailScreen:
             return []
         fields = _build_fields(self._aircraft, self._unit_system)
         label_width = max(len(label) for label, _ in fields)
-        lines = [_clip(f"{label.ljust(label_width)} : {value}", width) for label, value in fields]
-        return lines[:height]
+        body = []
+        for label, value in fields:
+            prefix = f"{label.ljust(label_width)}  "
+            wrapped = wrap_text(str(value), max(1, width - len(prefix))) or [""]
+            body.append(prefix + wrapped[0])
+            body.extend(" " * len(prefix) + extra for extra in wrapped[1:])
+        footer = ["", _FOOTER]
+        room = height - len(footer)
+        if len(body) <= room:
+            return [_clip(line, width) for line in body + footer][:height]
+        room = max(1, room - 1)
+        self._page = max(1, room - 1)
+        self._offset = min(self._offset, len(body) - room)
+        note = f"{self._offset + 1}-{self._offset + room}/{len(body)}"
+        window = body[self._offset : self._offset + room]
+        return [_clip(line, width) for line in window + [note.rjust(width)] + footer][:height]

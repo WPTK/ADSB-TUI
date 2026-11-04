@@ -19,13 +19,17 @@ maintainer.
 Two user intents are deliberately distinct, because they are distinct in real use --
 trying a setting for this session is not the same as committing it to disk:
 
-  * Enter or F10 *applies*: handle_key returns "close" with .applied True. The caller
-    adopts result() as the running config and writes nothing.
-  * F2 or Ctrl-S *applies and saves*: handle_key returns "close-and-save" with both
+  * s or F10 *applies*: handle_key returns "close" with .applied True. The caller adopts
+    result() as the running config and writes nothing.
+  * F2, S or Ctrl-S *applies and saves*: handle_key returns "close-and-save" with both
     .applied and .save_requested True. The caller adopts result() and persists it with
     config_write.dump_config().
-  * Esc *cancels*: handle_key returns "close" with .applied False, and result() still
-    reports the values the screen was opened with.
+  * Esc or q *cancels*: "close" with .applied False. With unsaved edits it first asks
+    "Discard changes? y/n"; result() still reports the values the screen was opened with.
+
+Enter never closes the dialog: it acts on the focused field (flip a toggle, cycle a choice,
+start editing text). While text is being edited, Enter or Tab commits it and Esc undoes it.
+Tab and Shift-Tab move between sections, Up/Down between fields.
 
 Applying never raises. The candidate Config is run through config.validate() first, and a
 ConfigError is caught and shown as an inline error line with the screen left open, so a
@@ -42,24 +46,20 @@ from typing import Any
 
 from adsbtui.config import Config, ConfigError, validate
 from adsbtui.ui.widgets import (
-    Form,
+    DiscardPrompt,
+    FieldList,
+    FieldRow,
     NumberField,
     Select,
     Tabs,
     TextField,
     Toggle,
-    wrap_text,
+    classify_key,
+    compose_dialog,
 )
 
-_CANCEL_KEYS = frozenset({27})
-_APPLY_KEYS = frozenset({10, 13, curses.KEY_ENTER, curses.KEY_F10})
-#: F2, or Ctrl-S (byte 19). Both are non-printable, so neither can be swallowed by a
-#: focused TextField the way a plain letter would be.
-_SAVE_KEYS = frozenset({curses.KEY_F2, 19})
-_NEXT_TAB_KEYS = frozenset({ord("\t")})
-_PREV_TAB_KEYS = frozenset({curses.KEY_BTAB})
-
-_FOOTER_TEXT = "Tab/Shift-Tab section   Up/Down field   Enter apply   F2 apply+save   Esc cancel"
+_FOOTER_TEXT = "Up/Down move  Tab section  Enter edit  s apply  S save  Esc cancel"
+_EDIT_FOOTER_TEXT = "Editing: Enter or Tab keep  Esc undo  F10 apply  F2 save"
 
 #: dotted "section.key" -> the (value, label) choices offered for it by a Select.
 _CHOICES: dict[str, list[tuple[str, str]]] = {
@@ -356,16 +356,17 @@ class SettingsScreen:
         self._sections = _build_specs()
         self._widgets: dict[str, Any] = {}
         self._initial_numbers: dict[str, float] = {}
-        self._forms: list[Form] = []
+        self._forms: list[FieldList] = []
+        self._prompt = DiscardPrompt()
 
         for section_name, specs in self._sections:
             section_obj = getattr(cfg, section_name)
-            form_fields: list[tuple[str, Any]] = []
+            rows: list[FieldRow] = []
             for spec in specs:
                 widget = self._make_widget(spec, getattr(section_obj, spec.key))
                 self._widgets[spec.dotted] = widget
-                form_fields.append((spec.label, widget))
-            self._forms.append(Form(form_fields))
+                rows.append(FieldRow(spec.label, widget, spec.help))
+            self._forms.append(FieldList(rows))
 
         self._tabs = Tabs([name.capitalize() for name, _specs in self._sections])
 
@@ -454,7 +455,12 @@ class SettingsScreen:
 
     @property
     def title(self) -> str:
-        return "Settings"
+        return "Settings *" if self.dirty else "Settings"
+
+    @property
+    def dirty(self) -> bool:
+        """True when any field differs from what the screen was opened with."""
+        return any(form.dirty for form in self._forms)
 
     @property
     def active_tab(self) -> int:
@@ -467,7 +473,7 @@ class SettingsScreen:
     @property
     def focus_index(self) -> int:
         """Index of the focused field within the active section's form."""
-        return self._forms[self._tabs.active_index].focus_index
+        return self._forms[self._tabs.active_index].focus
 
     def _commit(self) -> bool:
         """Try to adopt the widgets' current state as the committed result.
@@ -486,27 +492,43 @@ class SettingsScreen:
         self._committed = candidate
         return True
 
+    def _form(self) -> FieldList:
+        return self._forms[self._tabs.active_index]
+
+    def _finish(self, save: bool) -> str | None:
+        if self._form().editing:
+            self._form().stop_edit()
+        if not self._commit():
+            return None
+        self.applied = True
+        self.save_requested = save
+        return "close-and-save" if save else "close"
+
+    def _cancel(self) -> str | None:
+        if self.dirty:
+            self._prompt.active = True
+            return None
+        return "close"
+
     def handle_key(self, key: int) -> str | None:
-        if key in _CANCEL_KEYS:
-            return "close"
-        if key in _NEXT_TAB_KEYS:
-            self._tabs.handle_key(ord("\t"))
+        if self._prompt.active:
+            return "close" if self._prompt.handle_key(key) == "discard" else None
+        form = self._form()
+        # F-keys and Ctrl-S are never typed text, so they work mid-edit too; the letters
+        # s, S and q only act as commands while no text field is being edited.
+        action = classify_key(key)
+        if form.editing and key not in (curses.KEY_F10, curses.KEY_F2, 19):
+            action = None
+        if action == "cancel":
+            return self._cancel()
+        if action == "apply":
+            return self._finish(save=False)
+        if action == "save":
+            return self._finish(save=True)
+        if action in ("next", "prev") and not form.editing:
+            self._tabs.handle_key(ord("	") if action == "next" else curses.KEY_BTAB)
             return None
-        if key in _PREV_TAB_KEYS:
-            self._tabs.handle_key(curses.KEY_BTAB)
-            return None
-        if key in _APPLY_KEYS:
-            if not self._commit():
-                return None
-            self.applied = True
-            return "close"
-        if key in _SAVE_KEYS:
-            if not self._commit():
-                return None
-            self.applied = True
-            self.save_requested = True
-            return "close-and-save"
-        self._forms[self._tabs.active_index].handle_key(key)
+        form.handle_key(key)
         return None
 
     def result(self) -> Config:
@@ -521,44 +543,32 @@ class SettingsScreen:
     # Rendering (pure)
     # ----------------------------------------------------------------------------------
 
-    def _body_lines(self, width: int) -> tuple[list[str], int]:
-        """Every field line for the active section, each followed by its help line.
-
-        Also returns the body index of the focused field's own line, which is what the
-        scroll window in render_lines() keeps on screen.
-        """
-        index = self._tabs.active_index
-        form = self._forms[index]
-        specs = self._sections[index][1]
-        field_lines = form.render_lines(width)
-
-        body: list[str] = []
-        focus_line = 0
-        for i, spec in enumerate(specs):
-            if i == form.focus_index:
-                focus_line = len(body)
-            body.append(field_lines[i] if i < len(field_lines) else "")
-            body.extend(wrap_text(spec.help, width, "      ") if spec.help else [""])
-        return body, focus_line
-
     def render_lines(self, width: int, height: int) -> list[str]:
         if width <= 0 or height <= 0:
             return []
+        form = self._form()
+        if self._prompt.active:
+            status = DiscardPrompt.TEXT
+        elif self.error:
+            status = f"! {self.error}"
+        else:
+            status = ""
+        footer = _EDIT_FOOTER_TEXT if form.editing else _FOOTER_TEXT
+        tallest = max(len(f.rows) for f in self._forms)
 
-        head = [_clip(self._tabs.render_lines(width)[0], width), ""]
-        tail = [""]
-        if self.error:
-            tail.append(_clip(f"! {self.error}", width))
-        tail.extend(wrap_text(_FOOTER_TEXT, width))
+        def body(capacity: int) -> tuple[list[str], int, str]:
+            form.page = max(1, capacity - 1)
+            return form.render(width, capacity)
 
-        capacity = height - len(head) - len(tail)
-        if capacity < 1:
-            return (head + tail)[:height]
-
-        body, focus_line = self._body_lines(width)
-        if len(body) > capacity:
-            # Keep the focused field and its help line both visible when they fit.
-            start = max(0, min(focus_line + 2 - capacity, len(body) - capacity))
-            body = body[start : start + capacity]
-
-        return head + body + tail
+        lines, focus = compose_dialog(
+            width,
+            height,
+            head=[self._tabs.render_lines(width)[0], "-" * width],
+            body=body,
+            help_text=form.focused.help,
+            status=status,
+            footer=footer,
+            min_height=tallest + 8,
+        )
+        self.highlight_row = focus
+        return lines

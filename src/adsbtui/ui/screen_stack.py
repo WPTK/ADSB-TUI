@@ -108,6 +108,8 @@ class ScreenStack:
             display.columns = list(result.get("columns", display.columns))
             display.borders = str(result.get("borders", display.borders))
         elif name == "watchlist":
+            if not screen.applied:  # cancelled: result() is the original, nothing to save
+                return
             entries = list(screen.result())
             self.effects.set_watch_entries(entries)
             self.effects.refresh_now()

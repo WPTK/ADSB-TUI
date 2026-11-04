@@ -23,22 +23,19 @@ import curses
 from collections.abc import Mapping
 from typing import Any
 
-from adsbtui.ui.widgets import Form, NumberField, TextField, Toggle, wrap_text
+from adsbtui.ui.widgets import (
+    DiscardPrompt,
+    FieldList,
+    FieldRow,
+    NumberField,
+    TextField,
+    Toggle,
+    classify_key,
+    compose_dialog,
+)
 
-#: Escape cancels the screen: discard any in-progress edits and close without applying.
-_CANCEL_KEYS = frozenset({27})
-
-#: Enter (in any of its curses-reported forms) or F10 applies the edited values and closes.
-_APPLY_KEYS = frozenset({10, 13, curses.KEY_ENTER, curses.KEY_F10})
-
-_FOOTER_TEXT = "Enter/F10 apply   Esc cancel   Tab/Shift-Tab/Up/Down move   Space toggle"
-
-
-def _clip(text: str, width: int) -> str:
-    """Truncate text to at most width characters; empty string for width <= 0."""
-    if width <= 0:
-        return ""
-    return text[:width] if len(text) > width else text
+_FOOTER_TEXT = "Up/Down field  Space/Enter change  s apply  Esc cancel"
+_EDIT_FOOTER_TEXT = "Editing: Enter or Tab keep  Esc undo  F10 apply"
 
 
 def _coerce_int(value: float | None, fallback: int) -> int:
@@ -60,13 +57,11 @@ class FiltersScreen:
     search_text is the free-text substring filter across flight/hex/registration/owner,
     edited here as an ordinary field of the same form rather than a separate screen.
 
-    Tab/Shift-Tab or Up/Down move focus between the five fields (delegated straight to the
-    underlying Form, which already implements that); every other key is delegated to the
-    focused widget (Space flips a Toggle, printable characters/Backspace/Delete/Left/Right/
-    Home/End edit a TextField or NumberField). Escape closes without applying: the
-    'applied' flag stays False, telling a caller to discard whatever result() would
-    return. Enter or F10 sets 'applied' to True and closes: the caller should then read
-    result() and write it back into its own filter state.
+    Up/Down move between the five fields; Space or Enter flips a Toggle, and Enter starts
+    editing a text or number field (Enter or Tab keeps the edit, Esc undoes it). s or F10
+    (also F2/S, there being nothing to save to disk here) sets 'applied' and closes: the
+    caller should then read result() and write it back into its own filter state. Esc or q
+    closes without applying; with unsaved edits it first asks "Discard changes? y/n".
     """
 
     def __init__(self, filters: Mapping[str, Any], search_text: str = "") -> None:
@@ -74,40 +69,59 @@ class FiltersScreen:
         self._initial_max_alt = int(filters.get("max_alt_ft", 60000))
 
         self._search = TextField(initial=search_text)
-        self._hide_ground = Toggle(
-            initial=bool(filters.get("hide_ground", False)), label="Hide ground traffic"
-        )
-        self._include_nonicao = Toggle(
-            initial=bool(filters.get("include_nonicao", True)),
-            label="Include non-ICAO addresses",
-        )
+        self._hide_ground = Toggle(initial=bool(filters.get("hide_ground", False)))
+        self._include_nonicao = Toggle(initial=bool(filters.get("include_nonicao", True)))
         self._min_alt = NumberField(initial=str(self._initial_min_alt))
         self._max_alt = NumberField(initial=str(self._initial_max_alt))
 
-        self._form = Form(
+        self._form = FieldList(
             [
-                ("Search", self._search),
-                ("Hide ground", self._hide_ground),
-                ("Include non-ICAO", self._include_nonicao),
-                ("Min altitude (ft)", self._min_alt),
-                ("Max altitude (ft)", self._max_alt),
+                FieldRow(
+                    "Search",
+                    self._search,
+                    "Show only aircraft whose flight, hex, registration or owner "
+                    "contains this text.",
+                ),
+                FieldRow(
+                    "Hide ground", self._hide_ground, "Hide aircraft that report being on the ground."
+                ),
+                FieldRow(
+                    "Include non-ICAO",
+                    self._include_nonicao,
+                    "Include ~-prefixed TIS-B/MLAT addresses that have no real ICAO hex.",
+                ),
+                FieldRow("Min altitude (ft)", self._min_alt, "Hide aircraft below this altitude."),
+                FieldRow("Max altitude (ft)", self._max_alt, "Hide aircraft above this altitude."),
             ]
         )
+        self._prompt = DiscardPrompt()
         self.applied = False
+        self.highlight_row: int | None = None
 
     @property
     def title(self) -> str:
-        return "Filters"
+        return "Filters *" if self._form.dirty else "Filters"
 
     @property
     def focus_index(self) -> int:
         """Index of the currently focused field within the form (0-based)."""
-        return self._form.focus_index
+        return self._form.focus
 
     def handle_key(self, key: int) -> str | None:
-        if key in _CANCEL_KEYS:
+        if self._prompt.active:
+            return "close" if self._prompt.handle_key(key) == "discard" else None
+        editing = self._form.editing
+        action = classify_key(key)
+        if editing and key not in (curses.KEY_F10, curses.KEY_F2):
+            action = None
+        if action == "cancel":
+            if self._form.dirty:
+                self._prompt.active = True
+                return None
             return "close"
-        if key in _APPLY_KEYS:
+        if action in ("apply", "save"):
+            if editing:
+                self._form.stop_edit()
             self.applied = True
             return "close"
         self._form.handle_key(key)
@@ -130,8 +144,15 @@ class FiltersScreen:
     def render_lines(self, width: int, height: int) -> list[str]:
         if width <= 0 or height <= 0:
             return []
-        lines: list[str] = [_clip(self.title, width), ""]
-        lines.extend(self._form.render_lines(width))
-        lines.append("")
-        lines.extend(wrap_text(_FOOTER_TEXT, width))
-        return lines[:height]
+        form = self._form
+        lines, self.highlight_row = compose_dialog(
+            width,
+            height,
+            head=[],
+            body=lambda capacity: form.render(width, capacity),
+            help_text=form.focused.help,
+            status=DiscardPrompt.TEXT if self._prompt.active else "",
+            footer=_EDIT_FOOTER_TEXT if form.editing else _FOOTER_TEXT,
+            min_height=len(form.rows) + 5,
+        )
+        return lines
