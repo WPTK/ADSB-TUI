@@ -118,6 +118,9 @@ ROW_STYLES: dict[str, RowStyle] = {
     "normal": RowStyle(fg="default"),
     "header": RowStyle(fg="cyan", bold=True),
     "selected": RowStyle(fg="default", reverse=True),
+    # The aircraft under the mouse: bold reverse in the accent colour, so it reads as
+    # different from both the selection cursor and any alert style.
+    "hover": RowStyle(fg="yellow", bold=True, reverse=True),
     "overhead": RowStyle(fg="yellow", bold=True),
     "inbound": RowStyle(fg="yellow"),
     "emergency": RowStyle(fg="red", bold=True, reverse=True),

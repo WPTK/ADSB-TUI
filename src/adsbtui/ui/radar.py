@@ -26,6 +26,8 @@ import math
 from dataclasses import dataclass
 
 from adsbtui.model import Aircraft, AlertLevel
+from adsbtui.normalize import sanitize
+from adsbtui.units import UNIT_SYSTEMS, format_altitude, format_distance, format_speed
 
 #: Terminal character cells are roughly twice as tall as wide; halving vertical distance
 #: makes a range ring look like a circle instead of an ellipse.
@@ -45,15 +47,28 @@ _NO_TRACK_ASCII = "o"
 
 
 @dataclass(frozen=True)
+class Plotted:
+    """One aircraft glyph on the scope. rank orders importance for hit-testing when glyphs
+    overlap (lower is more important)."""
+
+    col: int
+    row: int
+    hex: str
+    rank: int
+
+
+@dataclass(frozen=True)
 class Scope:
     """A rendered scope: character rows plus the style name for each cell.
 
     styles[row][col] is a ui.theme.ROW_STYLES key, or "" for an unstyled blank. Callers
-    zip the two together; nothing here knows what a curses attribute is.
+    zip the two together; nothing here knows what a curses attribute is. plotted lists every
+    aircraft glyph, including ones another glyph covers, for hit-testing.
     """
 
     lines: list[str]
     styles: list[list[str]]
+    plotted: tuple[Plotted, ...] = ()
 
     @property
     def height(self) -> int:
@@ -101,6 +116,54 @@ def _style_for(aircraft: Aircraft, selected: bool) -> str:
     return "normal"
 
 
+_RANK = {"emergency": 0, "selected": 1, "military": 2, "watchlist": 2, "overhead": 3, "inbound": 4}
+
+
+def hex_at(scope: Scope, col: int, row: int) -> str | None:
+    """The aircraft whose glyph is at scope cell (col, row), or the nearest within one cell.
+
+    Terminal cells are about twice as tall as wide, so a row off counts as far as two columns.
+    Among equally near glyphs the most important wins (emergency, selection, then alerts).
+    """
+    best: tuple[int, int, str] | None = None
+    for p in scope.plotted:
+        dc, dr = abs(p.col - col), abs(p.row - row)
+        if dc > 1 or dr > 1:
+            continue
+        candidate = (dc * dc + (2 * dr) ** 2, p.rank, p.hex)
+        if best is None or candidate < best:
+            best = candidate
+    return best[2] if best else None
+
+
+def tooltip_lines(ac: Aircraft, unit_system: str) -> list[str]:
+    """The few lines a hover tooltip shows: callsign, tail and type, altitude, speed, distance."""
+    units = UNIT_SYSTEMS.get(unit_system, UNIT_SYSTEMS["imperial"])
+    reg = sanitize(ac.registration) if ac.registration else "N/A"
+    kind = sanitize(ac.type_code) if ac.type_code else "N/A"
+    alt = format_altitude(ac.altitude_ft, units["altitude"], on_ground=ac.on_ground)
+    return [
+        ac.display_flight,
+        f"{reg}  {kind}",
+        f"Alt  {alt}",
+        f"Spd  {format_speed(ac.ground_speed_kt, units['speed'])}",
+        f"Dist {format_distance(ac.distance_mi, units['distance'])}",
+    ]
+
+
+def tooltip_origin(
+    glyph_col: int, glyph_row: int, box_w: int, box_h: int, term_w: int, term_h: int
+) -> tuple[int, int]:
+    """Top-left of a tooltip box beside the glyph at terminal cell (glyph_col, glyph_row):
+    to its right, flipped to its left when there is no room, clamped into the terminal."""
+    x = glyph_col + 2
+    if x + box_w > term_w:
+        x = glyph_col - box_w - 1
+    x = max(0, min(x, term_w - box_w))
+    y = max(0, min(glyph_row - box_h // 2, term_h - box_h))
+    return x, y
+
+
 def render(
     aircraft_list: list[Aircraft],
     width: int,
@@ -108,6 +171,7 @@ def render(
     range_mi: float,
     selected_hex: str | None = None,
     ascii_only: bool = False,
+    hover_hex: str | None = None,
 ) -> Scope:
     """Draw the scope: range rings, compass ticks, home, and one glyph per aircraft.
 
@@ -139,7 +203,7 @@ def render(
     def put(col: int, row: int, char: str, style: str, force: bool = False) -> None:
         if not (0 <= row < height and 0 <= col < width):
             return
-        if not force and styles[row][col] in ("emergency", "selected"):
+        if not force and styles[row][col] in ("emergency", "selected", "hover"):
             return
         grid[row][col] = char
         styles[row][col] = style
@@ -167,6 +231,8 @@ def render(
     put(_cell(cx), _cell(cy), "+" if ascii_only else "⌂", "header", force=True)
 
     # --- aircraft ----------------------------------------------------------------
+    plotted: list[Plotted] = []
+    hovered: tuple[int, int, str] | None = None
     for ac in aircraft_list:
         if ac.distance_mi is None or ac.bearing_deg is None:
             continue
@@ -182,9 +248,17 @@ def render(
         # marker (none of those are protected), but it must NOT overwrite an emergency or
         # the selection already in that cell -- in a busy sector the contact you are
         # watching is exactly the one that would silently disappear.
-        put(col, row, arrow_for_track(ac.track_deg, ascii_only), style)
+        glyph = arrow_for_track(ac.track_deg, ascii_only)
+        put(col, row, glyph, style)
+        plotted.append(Plotted(col, row, ac.hex, _RANK.get(style, 5)))
+        if hover_hex is not None and ac.hex == hover_hex:
+            hovered = (col, row, glyph)
 
-    return Scope(lines=["".join(row) for row in grid], styles=styles)
+    # The pointer's aircraft is drawn last and forced, so it shows even in a crowded cell.
+    if hovered is not None:
+        put(hovered[0], hovered[1], hovered[2], "hover", force=True)
+
+    return Scope(lines=["".join(row) for row in grid], styles=styles, plotted=tuple(plotted))
 
 
 def range_label(range_mi: float, unit_label: str = "mi") -> str:
