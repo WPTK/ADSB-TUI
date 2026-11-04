@@ -34,6 +34,7 @@ import logging
 import os
 import queue
 import sqlite3
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -54,6 +55,7 @@ from adsbtui.model import Aircraft
 from adsbtui.sources import Source, SourceError
 from adsbtui.sources.demo import DemoSource
 from adsbtui.ui.controller import Controller, Outcome
+from adsbtui.ui import mouse
 from adsbtui.ui.frame import Frame
 from adsbtui.ui.render import Layout, Renderer, layout_for
 from adsbtui.ui.view import ViewState
@@ -67,6 +69,33 @@ GETCH_TIMEOUT_MS = 200
 BACKOFF_BASE_S = 1.0
 
 _LOGGER_NAME = "adsbtui"
+
+#: xterm "any-event" mouse tracking: motion is reported with no button held, which hover needs.
+#: ncurses only asks for press/release/drag, so this is written to the terminal directly.
+_ANY_MOTION_ON = "[?1003h"
+_ANY_MOTION_OFF = "[?1003l"
+
+
+def _enable_mouse() -> bool:
+    """Turn on curses mouse reporting; True when xterm any-motion tracking was also sent.
+
+    Constants differ by build (windows-curses is PDCurses), so everything is looked up with
+    getattr and failure just leaves the mouse off. Click and wheel work from the mask alone;
+    hover needs motion reports, which only an ncurses terminal gets from the escape below.
+    """
+    try:
+        curses.mousemask(mouse.mask())
+    except (curses.error, AttributeError):
+        return False
+    with contextlib.suppress(curses.error, AttributeError):
+        curses.mouseinterval(0)
+    if sys.platform == "win32" or not sys.stdout.isatty():
+        return False
+    with contextlib.suppress(OSError, ValueError):
+        sys.stdout.write(_ANY_MOTION_ON)
+        sys.stdout.flush()
+        return True
+    return False
 
 
 def run_check(cfg: Config, source: Source, clock: Callable[[], float] = time.time) -> int:
@@ -146,6 +175,7 @@ class App:
 
         self._frame_seq = 0
         self._wake = threading.Event()
+        self._deduper = mouse.ClickDeduper()
 
     def _build_dispatcher(self) -> dispatch.Dispatcher:
         return dispatch.Dispatcher(
@@ -341,6 +371,17 @@ class App:
     # Main event loop
     # ------------------------------------------------------------------
 
+    def _on_mouse(self, stdscr) -> bool:
+        """Read one pending mouse report and apply it; True when the screen needs a redraw."""
+        try:
+            _id, x, y, _z, bstate = curses.getmouse()
+        except curses.error:
+            return False
+        event = mouse.translate(bstate, x, y)
+        if event is None or not self._deduper.accept(event, self._monotonic()):
+            return False
+        return self.controller.handle_mouse(event, self._layout(stdscr), self.renderer.geometry)
+
     def _event_loop(self, stdscr, stop_event: threading.Event, out_queue: queue.Queue) -> int:
         view = self.view
 
@@ -375,6 +416,13 @@ class App:
             key = stdscr.getch()
             if key == -1:
                 continue
+
+            # A mouse report only repaints when it changed something: with motion tracking
+            # on there is one for every cell the pointer crosses.
+            if key == curses.KEY_MOUSE:
+                if self._on_mouse(stdscr):
+                    view.dirty = True
+                continue
             view.dirty = True
 
             if key == curses.KEY_RESIZE:
@@ -390,6 +438,7 @@ class App:
         fetch_thread = threading.Thread(
             target=self._fetch_loop, args=(stop_event, out_queue), daemon=True
         )
+        any_motion = False
         try:
             # Some terminals do not support cursor visibility control at all -- this must
             # never crash startup.
@@ -397,6 +446,7 @@ class App:
                 curses.curs_set(0)
             stdscr.timeout(GETCH_TIMEOUT_MS)
             self.renderer.setup()
+            any_motion = _enable_mouse()
 
             fetch_thread.start()
             self._start_registry_refresh()
@@ -404,6 +454,10 @@ class App:
         except KeyboardInterrupt:
             return 0
         finally:
+            if any_motion:
+                with contextlib.suppress(OSError, ValueError):
+                    sys.stdout.write(_ANY_MOTION_OFF)
+                    sys.stdout.flush()
             stop_event.set()
             self._wake.set()
             fetch_thread.join(timeout=2.0)

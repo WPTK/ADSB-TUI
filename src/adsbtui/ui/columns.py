@@ -30,6 +30,7 @@ from adsbtui.alerts import classify_trend, decode_category, decode_db_flags, tre
 from adsbtui.geo import compass_point
 from adsbtui.model import Aircraft, AlertLevel
 from adsbtui.normalize import sanitize
+from adsbtui.ui.sorting import column_for_sort_key
 from adsbtui.ui.theme import glyphs
 from adsbtui.units import (
     UNIT_SYSTEMS,
@@ -65,9 +66,10 @@ class ColumnSpec:
     align: str = "left"
     short: str = ""
 
-    def label(self, width: int) -> str:
-        """The longest header that fits in width, falling back to the short form."""
-        if len(self.header) <= width or not self.short:
+    def label(self, width: int, reserve: int = 0) -> str:
+        """The longest header that fits in width less reserve cells (the sort arrow), falling
+        back to the short form."""
+        if len(self.header) + reserve <= width or not self.short:
             return self.header
         return self.short
 
@@ -78,13 +80,13 @@ COLUMN_SPECS: dict[str, ColumnSpec] = {
         "flight", "FLIGHT", min_width=8, max_width=10, priority=0, align="left", short="FLT"
     ),
     "alt": ColumnSpec(
-        "alt", "ALTITUDE", min_width=9, max_width=10, priority=2, align="right", short="ALT"
+        "alt", "ALTITUDE", min_width=10, max_width=10, priority=2, align="right", short="ALT"
     ),
     "gs": ColumnSpec(
-        "gs", "SPEED", min_width=7, max_width=9, priority=3, align="right", short="SPD"
+        "gs", "SPEED", min_width=8, max_width=9, priority=3, align="right", short="SPD"
     ),
     "dist": ColumnSpec(
-        "dist", "DISTANCE", min_width=8, max_width=9, priority=1, align="right", short="DIST"
+        "dist", "DISTANCE", min_width=10, max_width=10, priority=1, align="right", short="DIST"
     ),
     "alert": ColumnSpec(
         "alert", "ALERT", min_width=5, max_width=8, priority=4, align="left", short="ALRT"
@@ -105,7 +107,7 @@ COLUMN_SPECS: dict[str, ColumnSpec] = {
         "flags", "FLAGS", min_width=5, max_width=20, priority=11, align="left", short="FLAGS"
     ),
     "owner": ColumnSpec(
-        "owner", "OWNER", min_width=5, max_width=40, priority=6, align="left", short="OWNER"
+        "owner", "OWNER", min_width=5, max_width=48, priority=6, align="left", short="OWNER"
     ),
     "age": ColumnSpec(
         "age", "AGE", min_width=3, max_width=4, priority=12, align="right", short="AGE"
@@ -113,8 +115,8 @@ COLUMN_SPECS: dict[str, ColumnSpec] = {
     "cpa": ColumnSpec(
         "cpa",
         "CLOSEST PASS",
-        min_width=10,
-        max_width=13,
+        min_width=12,
+        max_width=14,
         priority=10,
         align="right",
         short="CLOSEST",
@@ -289,6 +291,37 @@ def _cell_alert(ac: Aircraft, unit_system: str, ascii_only: bool) -> str:
     return _ALERT_TAGS.get(ac.alert_level, "")
 
 
+# Columns whose cell has sub-fields build their own padded text so the sub-fields line up
+# row to row: a right-aligned "arrow + number" lets the arrow float, a right-aligned
+# "distance + minutes" lets the minutes drift. Each takes the column width as a fourth argument.
+
+
+def _wide_vs(ac: Aircraft, unit_system: str, ascii_only: bool, width: int) -> str:
+    """Climb: a fixed 1-cell arrow field, a space, then the signed rate right-aligned."""
+    trend = classify_trend(ac.baro_rate_fpm, ac.geom_rate_fpm, DEFAULT_VS_THRESHOLD_FPM)
+    glyph = trend_glyph(trend, ascii_only=ascii_only)
+    if not glyph:
+        return ""
+    rate = ac.baro_rate_fpm if ac.baro_rate_fpm is not None else ac.geom_rate_fpm
+    unit = UNIT_SYSTEMS[unit_system]["vspeed"]
+    return textwidth.ljust(glyph, 1) + " " + textwidth.rjust(format_vspeed(rate, unit), width - 2)
+
+
+def _wide_cpa(ac: Aircraft, unit_system: str, ascii_only: bool, width: int) -> str:
+    """Closest pass: distance right-aligned, then a 3-cell right-aligned time."""
+    if ac.on_ground or ac.cpa_distance_mi is None or ac.cpa_seconds is None:
+        return ""
+    unit = UNIT_SYSTEMS[unit_system]["distance"]
+    dist = format_distance(ac.cpa_distance_mi, unit)
+    when = _format_short_duration(ac.cpa_seconds)
+    return textwidth.rjust(dist, width - 4) + " " + textwidth.rjust(when, 3)
+
+
+_WIDE_BUILDERS: dict[str, Callable[[Aircraft, str, bool, int], str]] = {
+    "vs": _wide_vs,
+    "cpa": _wide_cpa,
+}
+
 _CELL_BUILDERS: dict[str, Callable[[Aircraft, str, bool], str]] = {
     "flight": _cell_flight,
     "hex": _cell_hex,
@@ -362,9 +395,10 @@ def compute_widths(columns: list[str], available_width: int, owner_width: int) -
 
     Every column starts at its min_width. Any leftover space (available_width minus the
     sum of min_widths and separators) is given first to "owner", up to
-    min(owner_width, its max_width); anything still left over after that goes to the
-    widest remaining column that still has room to grow (max_width > its current width),
-    one column at a time, widest first, until either the leftover or the room runs out.
+    min(owner_width, its max_width), then to "owner" again up to its max_width; only once
+    owner is full does anything go to the widest remaining column that still has room to
+    grow (max_width > its current width), one column at a time, until either the leftover
+    or the room runs out.
 
     Never returns a set of widths whose total (including one separator per gap) exceeds
     available_width, provided columns already fits per layout()'s rules; if it does not
@@ -386,6 +420,12 @@ def compute_widths(columns: list[str], available_width: int, owner_width: int) -
         grow = min(leftover, max(0, cap - widths["owner"]))
         widths["owner"] += grow
         leftover -= grow
+        # Anything still left belongs to owner too, up to its max: the other columns hold
+        # fixed-format values, and widening them only opens gaps between a number and the
+        # neighbouring column.
+        grow = min(leftover, max(0, COLUMN_SPECS["owner"].max_width - widths["owner"]))
+        widths["owner"] += grow
+        leftover -= grow
 
     while leftover > 0:
         growable = [c for c in columns if widths[c] < COLUMN_SPECS[c].max_width]
@@ -405,23 +445,78 @@ def compute_widths(columns: list[str], available_width: int, owner_width: int) -
 # --------------------------------------------------------------------------------------
 
 
-def format_header(columns: list[str], widths: dict[str, int], border_style: str) -> str:
+def column_spans(columns: list[str], widths: dict[str, int]) -> list[tuple[str, int, int]]:
+    """(key, start, end) for each rendered column; end is exclusive. The one place column
+    positions are computed, so the header, the rows and mouse hit-testing cannot disagree."""
+    spans = []
+    x = 0
+    for key in columns:
+        if key not in COLUMN_SPECS or key not in widths:
+            continue
+        spans.append((key, x, x + widths[key]))
+        x += widths[key] + len(GUTTER)
+    return spans
+
+
+def column_at(columns: list[str], widths: dict[str, int], x: int) -> str | None:
+    """The column key under x (relative to the table's left edge), or None past the last
+    column or left of the first. The gutter after a column counts as that column, so a click
+    just beside a header label still lands."""
+    for key, start, end in column_spans(columns, widths):
+        if start <= x < end + len(GUTTER):
+            return key
+    return None
+
+
+def visible_columns(columns: list[str], aircraft: list[Aircraft]) -> list[str]:
+    """columns without "alert" when no aircraft has an alert tag to show: a column that is
+    blank on every row only takes width the owner column could use."""
+    if "alert" not in columns:
+        return columns
+    if any(_ALERT_TAGS.get(ac.alert_level) for ac in aircraft):
+        return columns
+    return [c for c in columns if c != "alert"]
+
+
+def format_header(
+    columns: list[str],
+    widths: dict[str, int],
+    border_style: str,
+    sort_key: str | None = None,
+    sort_reverse: bool = False,
+) -> str:
     """Render the header row: each column's name, sized to widths[key], GUTTER-separated.
 
     Each column shows its full plain-English name when the assigned width has room for it
     and its short form otherwise, so a wide terminal reads "ALTITUDE  SPEED  DISTANCE" and
     a cramped one still reads "ALT  SPD  DIST" rather than something cryptic at every size.
 
-    border_style is accepted (and validated) for signature compatibility with format_row
-    and the drawing layer; the header itself is always whitespace-separated.
+    A header pads exactly as its data does: left-aligned text starts where the data starts,
+    right-aligned text ends where the data ends. The active sort column (sort_key is a
+    SORT_KEYS value) carries an arrow, up for ascending and down for descending, placed on
+    the outside of the text -- before it on a right-aligned column, after it on a left-aligned
+    one -- so the label itself stays over its data.
+
+    border_style is validated; "ascii" also selects the ASCII arrow.
     """
-    glyphs(border_style)  # validate the style name; the header uses no glyph of its own
+    glyphs(border_style)  # validate the style name
+    active = column_for_sort_key(sort_key) if sort_key else None
+    if border_style == "ascii":
+        arrow = "v" if sort_reverse else "^"
+    else:
+        arrow = "▼" if sort_reverse else "▲"
     cells = []
     for key in columns:
         if key not in COLUMN_SPECS or key not in widths:
             continue
         spec = COLUMN_SPECS[key]
-        cells.append(sanitize_cell(spec.label(widths[key]), widths[key], align=spec.align))
+        width = widths[key]
+        if key == active and width >= 3:
+            label = textwidth.clip(spec.label(width, reserve=2), width - 2)
+            text = f"{arrow} {label}" if spec.align == "right" else f"{label} {arrow}"
+            cells.append(sanitize_cell(text, width, align=spec.align))
+        else:
+            cells.append(sanitize_cell(spec.label(width), width, align=spec.align))
     return GUTTER.join(cells)
 
 
@@ -452,8 +547,12 @@ def format_row(
             continue
         spec = COLUMN_SPECS[key]
         builder = _CELL_BUILDERS.get(key)
+        wide = _WIDE_BUILDERS.get(key)
         try:
-            raw_value = builder(aircraft, unit_system, ascii_only) if builder else ""
+            if wide is not None:
+                raw_value = wide(aircraft, unit_system, ascii_only, widths[key])
+            else:
+                raw_value = builder(aircraft, unit_system, ascii_only) if builder else ""
         except Exception:
             raw_value = ""
         cells.append(sanitize_cell(raw_value, widths[key], align=spec.align))

@@ -35,6 +35,9 @@ class ViewState:
     #: only the fallback when that aircraft has left the list.
     selected_hex: str | None = None
     scroll: int = 0
+    #: The aircraft under the mouse pointer on the scope, if any. Not the selection: it only
+    #: highlights and draws a tooltip, and clears when the pointer leaves.
+    hover_hex: str | None = None
     search_text: str = ""
     #: Open screens as (name, screen). Never deeper than one today; keeps the stack shape.
     stack: list[tuple[str, Any]] = field(default_factory=list)
