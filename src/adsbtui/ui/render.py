@@ -355,11 +355,9 @@ class Renderer:
         # terminal wasted room that was sitting right there.
         box_w = max(20, min(width - 4, 96))
         inner_w = box_w - 4
-        # The box itself can hold height-4 body rows (two borders, and box_h below adds two
-        # rows of padding), so asking a screen for height-8 threw away four usable rows and
-        # made long screens drop content that would have fitted.
-        lines = screen.render_lines(inner_w, max(1, height - 6))
-        box_h = min(height - 2, len(lines) + 4)
+        # Two border rows plus a one-row margin above and below leave height-4 body rows.
+        lines = screen.render_lines(inner_w, max(1, height - 4))
+        box_h = min(height - 2, len(lines) + 2)
         top = max(0, (height - box_h) // 2)
         left = max(0, (width - box_w) // 2)
 
@@ -376,10 +374,14 @@ class Renderer:
         top_line = tl + h + title + h * max(0, box_w - 3 - len(title)) + tr
         _safe_addstr(stdscr, top, left, top_line[:box_w], border_attr)
 
+        highlight = getattr(screen, "highlight_row", None)
         for i in range(box_h - 2):
             text = lines[i] if i < len(lines) else ""
             row = v + " " + text.ljust(inner_w)[:inner_w] + " " + v
-            _safe_addstr(stdscr, top + 1 + i, left, row[:box_w], body_attr)
+            # A screen may name the line holding its focus; draw it reversed so the
+            # focused field is findable at a glance without relying on a ">" alone.
+            attr = body_attr | curses.A_REVERSE if i == highlight else body_attr
+            _safe_addstr(stdscr, top + 1 + i, left, row[:box_w], attr)
 
         bottom_line = (bl + h * (box_w - 2) + br)[:box_w]
         _safe_addstr(stdscr, top + box_h - 1, left, bottom_line, border_attr)
