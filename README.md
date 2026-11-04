@@ -8,7 +8,7 @@ A terminal UI that lists aircraft near you from the `aircraft.json` feed of your
 - A `readsb` or `dump1090-fa` receiver whose `aircraft.json` you can reach by URL or file path (or use `--demo`, below)
 - Windows only: `windows-curses`, installed by the `windows` extra
 
-![adsbtui showing live traffic around SFO: the aircraft table with altitude-coloured rows and the radar scope](docs/screenshots/main.png)
+![adsbtui showing live traffic around SFO: the aircraft table with altitude-coloured rows and the radar scope](https://raw.githubusercontent.com/WPTK/ADSB-TUI/main/docs/screenshots/main.png)
 
 ## Quickstart
 
@@ -84,7 +84,7 @@ nothing to disk. The status line says DEMO.
 
 The mouse works too: click a column header to sort by it (click again to reverse), click a row or a scope arrow to select it, and scroll the wheel to move the cursor. Hovering an arrow on the scope highlights its row and shows a tooltip; hover needs a terminal that reports mouse motion (most xterm-compatible ones) and is not available on every Windows console.
 
-![The detail pane for one aircraft, with closest approach and squawk](docs/screenshots/detail.png)
+![The detail pane for one aircraft, with closest approach and squawk](https://raw.githubusercontent.com/WPTK/ADSB-TUI/main/docs/screenshots/detail.png)
 
 ## Configuration
 
@@ -92,9 +92,9 @@ Press `F2` in the app to edit every option. The config file is `$ADSBTUI_CONFIG`
 `$XDG_CONFIG_HOME/adsbtui/config.toml` (`~/.config/adsbtui/config.toml` by default); the current
 directory is never searched. Flags override `ADSBTUI_<SECTION>_<KEY>` environment
 variables, which override `config.toml`. The full key list, column meanings and the watchlist
-format are in [docs/configuration.md](docs/configuration.md).
+format are in [docs/configuration.md](https://github.com/WPTK/ADSB-TUI/blob/main/docs/configuration.md).
 
 ## License
 
-[CC0 1.0](LICENSE): public domain, no warranty. Downloaded registry data has its own terms,
+[CC0 1.0](https://github.com/WPTK/ADSB-TUI/blob/main/LICENSE): public domain, no warranty. Downloaded registry data has its own terms,
 shown in the app: the FAA extract is public domain, tar1090-db is non-commercial use only.

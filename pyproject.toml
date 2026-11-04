@@ -8,9 +8,31 @@ version = "0.11.0"
 description = "A curses TUI for tracking nearby aircraft from a dump1090/readsb ADS-B feed"
 readme = "README.md"
 license = "CC0-1.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 authors = [{ name = "WPTK" }]
+keywords = ["adsb", "ads-b", "dump1090", "readsb", "aircraft", "tui", "curses"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console :: Curses",
+    "Intended Audience :: End Users/Desktop",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Communications :: Ham Radio",
+    "Topic :: Terminals",
+]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/WPTK/ADSB-TUI"
+Repository = "https://github.com/WPTK/ADSB-TUI"
+Issues = "https://github.com/WPTK/ADSB-TUI/issues"
+Changelog = "https://github.com/WPTK/ADSB-TUI/releases"
 
 [project.optional-dependencies]
 windows = ["windows-curses>=2.3"]
