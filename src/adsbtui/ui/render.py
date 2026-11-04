@@ -233,10 +233,13 @@ class Renderer:
         ascii_only = border_style == "ascii"
         table_width = layout.table_width
 
-        columns = columns_mod.layout(display.columns, table_width, display.owner_width)
+        wanted = columns_mod.visible_columns(display.columns, aircraft_list)
+        columns = columns_mod.layout(wanted, table_width, display.owner_width)
         widths = columns_mod.compute_widths(columns, table_width, display.owner_width)
 
-        header_line = columns_mod.format_header(columns, widths, border_style)
+        header_line = columns_mod.format_header(
+            columns, widths, border_style, display.sort_key, display.sort_reverse
+        )
         _safe_addstr(stdscr, 1, 0, header_line[:table_width], header_attr)
 
         divider_char = theme.glyphs(border_style)["h"] or "-"

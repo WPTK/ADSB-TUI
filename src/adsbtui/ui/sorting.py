@@ -36,6 +36,23 @@ SORT_KEYS: list[tuple[str, str]] = [
 ]
 
 
+#: Table column key -> SORT_KEYS value, for the three columns whose sort key predates the
+#: column keys and is spelled out. Every other column sorts by its own key.
+_COLUMN_TO_SORT_KEY: dict[str, str] = {"dist": "distance", "alt": "altitude", "flight": "callsign"}
+_SORT_KEY_TO_COLUMN: dict[str, str] = {v: k for k, v in _COLUMN_TO_SORT_KEY.items()}
+
+
+def sort_key_for_column(column: str) -> str | None:
+    """The SORT_KEYS value that sorts by a table column, or None for a column with no sort."""
+    key = _COLUMN_TO_SORT_KEY.get(column, column)
+    return key if any(key == value for value, _label in SORT_KEYS) else None
+
+
+def column_for_sort_key(sort_key: str) -> str:
+    """The table column key a SORT_KEYS value sorts, the inverse of sort_key_for_column."""
+    return _SORT_KEY_TO_COLUMN.get(sort_key, sort_key)
+
+
 #: AlertLevel -> severity rank, for sorting by "alert level". Built from the enum's own
 #: declaration order (model.py), which is already least-to-most alarming.
 _ALERT_RANK: dict[AlertLevel, int] = {level: rank for rank, level in enumerate(AlertLevel)}
