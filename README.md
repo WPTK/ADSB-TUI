@@ -30,6 +30,19 @@ pipx install --editable .
 To update, `git pull` and restart adsbtui. A pipx install made without `--editable` won't pick
 up the pull; fix it once with `pipx install --force --editable .`.
 
+**Windows without Python:** each [GitHub Release](https://github.com/WPTK/ADSB-TUI/releases)
+includes `adsb-tui-<version>-windows-x64.exe`. Download it and run it from Windows Terminal
+(it is a terminal program; double-clicking opens a window that closes on exit). The exe is
+unsigned, so SmartScreen may warn "Windows protected your PC": choose More info, then Run anyway.
+To verify the download against the `.sha256` file from the same release:
+
+```powershell
+(Get-FileHash .dsb-tui-<version>-windows-x64.exe -Algorithm SHA256).Hash.ToLower()
+Get-Content .dsb-tui-<version>-windows-x64.exe.sha256
+```
+
+The two hashes must match. Then run `.dsb-tui-<version>-windows-x64.exe` in place of `adsbtui` below.
+
 2. Start the app:
 
 ```bash
