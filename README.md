@@ -68,6 +68,9 @@ nothing to disk. The status line says DEMO.
 
 `F3`–`F7` open filters, sort, columns and watchlist as in the key bar. Help (`F1`) lists every key and scrolls.
 
+
+The mouse works too: click a column header to sort by it (click again to reverse), click a row or a scope arrow to select it, and scroll the wheel to move the cursor. Hovering an arrow on the scope highlights its row and shows a tooltip; hover needs a terminal that reports mouse motion (most xterm-compatible ones) and is not available on every Windows console.
+
 ![The detail pane for one aircraft, with closest approach and squawk](docs/screenshots/detail.png)
 
 ## Configuration

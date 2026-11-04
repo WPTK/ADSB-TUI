@@ -15,11 +15,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from adsbtui import textwidth
 from adsbtui.config import DisplayConfig
 from adsbtui.model import Aircraft, AlertLevel
 from adsbtui.ui import bars, radar, theme
 from adsbtui.ui import columns as columns_mod
 from adsbtui.ui.keys import BAR_KEYMAP
+from adsbtui.ui.mouse import Geometry
 from adsbtui.ui.view import ViewState
 
 #: Below this width or height, the normal table layout is abandoned for a single centered
@@ -179,6 +181,8 @@ class Renderer:
         #: radar plot only change when the list, the layout or the scope settings do.
         self._row_cache: tuple[object, list[Aircraft], dict[int, str]] | None = None
         self._scope_cache: tuple[list[Aircraft], object, radar.Scope] | None = None
+        #: Where the last draw put the header, rows and scope, for mouse hit-testing.
+        self.geometry: Geometry | None = None
 
     def setup(self) -> None:
         """Resolve the colours; needs a live curses screen, so it is not done in __init__."""
@@ -191,6 +195,7 @@ class Renderer:
         attrs = self.attrs
 
         if layout.too_small:
+            self.geometry = None
             width, height = layout.width, layout.height
             msg = "Terminal too small"[: max(0, width)]
             y = max(0, height // 2)
@@ -265,20 +270,35 @@ class Renderer:
                 row_texts[index] = row_text
             if index == view.cursor and aircraft_list:
                 attr = attrs.get("selected", curses.A_REVERSE)
+            elif view.hover_hex is not None and ac.hex == view.hover_hex:
+                attr = attrs.get("hover", curses.A_REVERSE | curses.A_BOLD)
             else:
                 attr = attrs.get(_row_style_name(ac), normal_attr)
             _safe_addstr(stdscr, layout.table_top + i, 0, row_text[:table_width], attr)
 
+        scope = None
+        scope_left = table_width + RADAR_GAP
         if layout.radar_width:
-            self._draw_radar(
+            scope = self._draw_radar(
                 stdscr,
                 view,
-                left=table_width + RADAR_GAP,
+                left=scope_left,
                 top=1,
                 width=layout.radar_width,
                 height=height - 2,
                 ascii_only=ascii_only,
+                term_size=(width, height - 1),
             )
+        self.geometry = Geometry(
+            columns=tuple(columns),
+            widths=dict(widths),
+            table_width=table_width,
+            header_row=1,
+            first_row=layout.table_top,
+            scope_left=scope_left,
+            scope_top=1,
+            scope=scope,
+        )
 
         key_line = bars.key_bar_text(width, BAR_KEYMAP)
         _safe_addstr(stdscr, height - 1, 0, key_line, attrs.get("chrome", normal_attr))
@@ -298,15 +318,16 @@ class Renderer:
         width: int,
         height: int,
         ascii_only: bool,
-    ) -> None:
+        term_size: tuple[int, int],
+    ) -> radar.Scope | None:
         """Draw the scope pane: a bordered box with the PPI inside and a range caption.
 
         Cells are drawn one at a time because each carries its own style -- a ring dot, a
         compass tick and an emergency contact land in the same row and must not share an
-        attribute.
+        attribute. Returns the scope that was drawn (for mouse hit-testing), or None.
         """
         if width < 8 or height < 5:
-            return
+            return None
 
         attrs = self.attrs
         chrome = attrs.get("chrome", 0)
@@ -318,7 +339,15 @@ class Renderer:
         # applied; asking for more just pads it with blank rows and strands the caption
         # far below the rings.
         scope_h = min(height - 2, int(width * radar.ASPECT) + 2)
-        scope_key = (width, scope_h, radius, selected.hex if selected else None, ascii_only)
+        hover_hex = view.hover_hex
+        scope_key = (
+            width,
+            scope_h,
+            radius,
+            selected.hex if selected else None,
+            ascii_only,
+            hover_hex,
+        )
         cached = self._scope_cache
         if cached is not None and cached[0] is aircraft_list and cached[1] == scope_key:
             scope = cached[2]
@@ -330,6 +359,7 @@ class Renderer:
                 range_mi=radius,
                 selected_hex=selected.hex if selected else None,
                 ascii_only=ascii_only,
+                hover_hex=hover_hex,
             )
             self._scope_cache = (aircraft_list, scope_key, scope)
 
@@ -343,6 +373,45 @@ class Renderer:
 
         caption = radar.range_label(radius, self._distance_unit_label())
         _safe_addstr(stdscr, top + scope.height, left, caption[:width].center(width), chrome)
+
+        if hover_hex is not None:
+            self._draw_tooltip(stdscr, view, scope, hover_hex, left, top, term_size)
+        return scope
+
+    def _draw_tooltip(
+        self,
+        stdscr: Any,
+        view: ViewState,
+        scope: radar.Scope,
+        hover_hex: str,
+        left: int,
+        top: int,
+        term_size: tuple[int, int],
+    ) -> None:
+        """A small bordered box beside the hovered glyph: callsign, tail, type, altitude,
+        speed, distance. Drawn over whatever is there, clipped into the terminal."""
+        ac = next((a for a in view.rows if a.hex == hover_hex), None)
+        spot = next((p for p in scope.plotted if p.hex == hover_hex), None)
+        if ac is None or spot is None:
+            return
+        display = self._display()
+        text = radar.tooltip_lines(ac, display.units)
+        inner = max(textwidth.display_width(t) for t in text)
+        box_w, box_h = inner + 4, len(text) + 2
+        term_w, term_h = term_size
+        x, y = radar.tooltip_origin(left + spot.col, top + spot.row, box_w, box_h, term_w, term_h)
+
+        glyph = theme.glyphs(display.borders)
+        h, v = glyph.get("h") or "-", glyph.get("v") or "|"
+        corners = [glyph.get(k) or "+" for k in ("tl", "tr", "bl", "br")]
+        attr = self.attrs.get("normal", curses.A_NORMAL) | curses.A_REVERSE
+        edge = self.attrs.get("header", curses.A_BOLD)
+        _safe_addstr(stdscr, y, x, corners[0] + h * (box_w - 2) + corners[1], edge)
+        for i, line in enumerate(text):
+            _safe_addstr(stdscr, y + 1 + i, x, v, edge)
+            _safe_addstr(stdscr, y + 1 + i, x + 1, f" {textwidth.ljust(line, inner)} ", attr)
+            _safe_addstr(stdscr, y + 1 + i, x + box_w - 1, v, edge)
+        _safe_addstr(stdscr, y + box_h - 1, x, corners[2] + h * (box_w - 2) + corners[3], edge)
 
     def _distance_unit_label(self) -> str:
         return {"imperial": "mi", "metric": "km", "aviation": "nm"}.get(self._display().units, "mi")
