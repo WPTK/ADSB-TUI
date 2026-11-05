@@ -50,11 +50,11 @@ unsigned, so SmartScreen may warn "Windows protected your PC": choose More info,
 To verify the download against the `.sha256` file from the same release:
 
 ```powershell
-(Get-FileHash .dsb-tui-<version>-windows-x64.exe -Algorithm SHA256).Hash.ToLower()
-Get-Content .dsb-tui-<version>-windows-x64.exe.sha256
+(Get-FileHash .\adsb-tui-<version>-windows-x64.exe -Algorithm SHA256).Hash.ToLower()
+Get-Content .\adsb-tui-<version>-windows-x64.exe.sha256
 ```
 
-The two hashes must match. Then run `.dsb-tui-<version>-windows-x64.exe` in place of `adsbtui` below.
+The two hashes must match. Then run `.\adsb-tui-<version>-windows-x64.exe` in place of `adsbtui` below.
 
 2. Start the app:
 
