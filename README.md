@@ -12,7 +12,27 @@ A terminal UI that lists aircraft near you from the `aircraft.json` feed of your
 
 ## Quickstart
 
-1. Install:
+1. Install from [PyPI](https://pypi.org/project/adsb-tui/) with pipx. The package is named `adsb-tui`; the command it installs is `adsbtui`.
+
+```bash
+pipx install adsb-tui
+```
+
+On Windows, add the `windows` extra so curses works:
+
+```powershell
+pipx install "adsb-tui[windows]"
+```
+
+To update, run `pipx upgrade adsb-tui`. To remove it, run `pipx uninstall adsb-tui`.
+
+**Raspberry Pi OS** blocks plain `pip install`, so pipx is the way to go there. If you don't have it:
+
+```bash
+sudo apt install pipx && pipx ensurepath   # then open a new shell
+```
+
+**Development version:** to run the latest code from `main`, install from a clone instead.
 
 ```bash
 git clone https://github.com/WPTK/ADSB-TUI.git
@@ -20,14 +40,7 @@ cd ADSB-TUI
 pip install -e .            # Windows: pip install -e ".[windows]"
 ```
 
-**Raspberry Pi OS** blocks plain `pip install`. Use pipx:
-
-```bash
-sudo apt install pipx && pipx ensurepath   # then open a new shell
-pipx install --editable .
-```
-
-To update, `git pull` and restart adsbtui. A pipx install made without `--editable` won't pick
+With pipx, use `pipx install --editable .` from the clone. To update, `git pull` and restart adsbtui. A pipx install made without `--editable` won't pick
 up the pull; fix it once with `pipx install --force --editable .`.
 
 **Windows without Python:** each [GitHub Release](https://github.com/WPTK/ADSB-TUI/releases)
@@ -37,11 +50,11 @@ unsigned, so SmartScreen may warn "Windows protected your PC": choose More info,
 To verify the download against the `.sha256` file from the same release:
 
 ```powershell
-(Get-FileHash .dsb-tui-<version>-windows-x64.exe -Algorithm SHA256).Hash.ToLower()
-Get-Content .dsb-tui-<version>-windows-x64.exe.sha256
+(Get-FileHash .\adsb-tui-<version>-windows-x64.exe -Algorithm SHA256).Hash.ToLower()
+Get-Content .\adsb-tui-<version>-windows-x64.exe.sha256
 ```
 
-The two hashes must match. Then run `.dsb-tui-<version>-windows-x64.exe` in place of `adsbtui` below.
+The two hashes must match. Then run `.\adsb-tui-<version>-windows-x64.exe` in place of `adsbtui` below.
 
 2. Start the app:
 
