@@ -5,7 +5,7 @@
 # desktop environment, and no SSH session required.
 #
 # Install adsbtui for the service user first, so ExecStart below exists:
-#   sudo -u adsbtui pipx install /path/to/ADSB-TUI     # puts it in /home/adsbtui/.local/bin
+#   sudo -u adsbtui pipx install adsb-tui              # puts it in /home/adsbtui/.local/bin
 #
 # Install:
 #   sudo useradd --system --create-home --shell /usr/sbin/nologin adsbtui   # if it doesn't exist
